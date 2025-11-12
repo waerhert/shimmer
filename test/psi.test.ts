@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { PSIServer, PSIClient } from "../src/psi.js";
-import { Sketcher } from "../src/sketcher.js";
+import { PSIServer, PSIClient } from "../src/psi/psi.js";
+import { Sketcher } from "../src/sketcher/Sketcher.js";
 
 describe("PSI", () => {
   it("should compute intersection size on MinHash signatures", async () => {

@@ -4,22 +4,16 @@ import {
   removePublicAddressesMapper,
 } from "@libp2p/kad-dht";
 import { createLibp2p } from "libp2p";
-import { peerIdFromString } from "@libp2p/peer-id";
 import { ping } from "@libp2p/ping";
 import { identify } from "@libp2p/identify";
 import { tcp } from "@libp2p/tcp";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { bootstrap } from "@libp2p/bootstrap";
-import { sleep } from "../util.js";
-import { generateKeyPair, generateKeyPairFromSeed } from "@libp2p/crypto/keys";
 import { DHTDiscovery } from "../dht-discovery.js";
-import { lshTags } from "../crypto.js";
-import { Sketcher } from "../sketcher.js";
-import { tagToCID } from "../p2p.js";
-import { aminoBootstrappers } from "../amino-bootstrappers.js";
+import { Sketcher } from "../sketcher/Sketcher.js";
 import { identities, localMultiAddrFromIdentity } from "./id.js";
-import { PSIProtocol } from "../psi-protocol.js";
+import { PSIProtocol } from "../psi/protocol.js";
 import { LSHDiscovery } from "../lsh-discovery.js";
 // import { CID } from "multiformats/cid";
 // import * as raw from "multiformats/codecs/raw";
@@ -74,7 +68,6 @@ const lsh = new LSHDiscovery(node, sketcher, {
   }
 });
 lsh.start();
-
 
 await sketcher.sketch("words", ["1", "2", "3", "4"]);
 

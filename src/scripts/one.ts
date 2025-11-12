@@ -10,6 +10,8 @@ import { generateKeyPairFromSeed } from "@libp2p/crypto/keys";
 import { DHTDiscovery } from "../dht-discovery.js";
 import { peerIdFromPublicKey } from "@libp2p/peer-id";
 import { identities } from "./id.js";
+import type { PeerInfo } from '@libp2p/interface';
+
 
 const node = await createLibp2p({
   privateKey: identities.one.key,

@@ -1,5 +1,5 @@
 import type { Libp2p } from "libp2p";
-import type { Sketcher } from "./sketcher.js";
+import type { Sketcher } from "../sketcher/Sketcher.js";
 import { PSIServer, PSIClient } from "./psi.js";
 import { lpStream } from "@libp2p/utils";
 import type { Stream } from "@libp2p/interface";

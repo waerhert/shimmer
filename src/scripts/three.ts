@@ -12,13 +12,9 @@ import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { bootstrap } from "@libp2p/bootstrap";
 import { sleep } from "../util.js";
-import { generateKeyPair, generateKeyPairFromSeed } from "@libp2p/crypto/keys";
-import { DHTDiscovery } from "../dht-discovery.js";
-import { Sketcher } from "../sketcher.js";
-import { tagToCID } from "../p2p.js";
-import { aminoBootstrappers } from "../amino-bootstrappers.js";
+import { Sketcher } from "../sketcher/Sketcher.js";
 import { identities, localMultiAddrFromIdentity } from "./id.js";
-import { PSIProtocol } from "../psi-protocol.js";
+import { PSIProtocol } from "../psi/protocol.js";
 import { LSHDiscovery } from "../lsh-discovery.js";
 
 const node = await createLibp2p({

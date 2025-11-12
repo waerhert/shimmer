@@ -1,7 +1,8 @@
 import type { Libp2p } from "libp2p";
-import { Sketcher } from "./sketcher.js";
-import type { ModalityState } from "./sketcher.js";
-import { tagToCID } from "./p2p.js";
+import { Sketcher } from "./sketcher/Sketcher.js";
+import type { ModalityState } from "./sketcher/Sketcher.js";
+import { tagToCID } from "./util.js";
+
 
 export interface LSHDiscoveryOptions {
   autoAnnounce?: boolean; // Default: true

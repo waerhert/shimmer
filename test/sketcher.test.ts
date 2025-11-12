@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Sketcher } from "../src/sketcher.js";
+import { Sketcher } from "../src/sketcher/Sketcher.js";
 
 describe("Sketcher", () => {
   it("should produce overlapping tags for Alice and Bob with similar words", async () => {
