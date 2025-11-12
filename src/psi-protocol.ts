@@ -57,13 +57,14 @@ export class PSIProtocol {
         console.log(`[PSIProtocol] Received PSI request for modality: ${request.modality}`);
 
         // Get our sketch for this modality
-        const modalityState = this.sketcher.getModalityState(request.modality);
-        if (!modalityState) {
+        // TODO: Consider doing PSI on the original inputs instead of the signature
+        const signature = this.sketcher.getSignature(request.modality);
+        if (!signature) {
           throw new Error(`No sketch data for modality: ${request.modality}`);
         }
 
         // Convert our signature to items for PSI
-        const ourItems = modalityState.signature.map((sig) =>
+        const ourItems = signature.map((sig) =>
           sig.toString(16).padStart(16, "0")
         );
 
@@ -95,13 +96,13 @@ export class PSIProtocol {
     modality: string
   ): Promise<ProximityPeer | null> {
     try {
-      const modalityState = this.sketcher.getModalityState(modality as any);
-      if (!modalityState) {
+      const signature = this.sketcher.getSignature(modality as any);
+      if (!signature) {
         throw new Error(`No sketch data for modality: ${modality}`);
       }
 
       // Convert our signature to items for PSI
-      const ourItems = modalityState.signature.map((sig) =>
+      const ourItems = signature.map((sig) =>
         sig.toString(16).padStart(16, "0")
       );
 

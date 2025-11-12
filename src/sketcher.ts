@@ -66,21 +66,28 @@ export class Sketcher<T extends string = DefaultModalities> extends EventEmitter
     });
   }
 
-  public getTags() {
-    const result = new Map<T, Tags>();
+  public getTags(modality: T): Tags | undefined {
+    const state = this.modalityState.get(modality);
+    if (!state) return undefined;
 
-    for (const [modality, state] of this.modalityState) {
-      const currentEpoch = this.calculateEpoch(
-        this.config[modality].epochInterval
-      );
+    const currentEpoch = this.calculateEpoch(
+      this.config[modality].epochInterval
+    );
+    if (state.epoch !== currentEpoch) return undefined;
 
-      // Only include if still in same epoch
-      if (state.epoch === currentEpoch) {
-        result.set(modality, state.tags);
-      }
-    }
+    return state.tags;
+  }
 
-    return result;
+  public getSignature(modality: T): bigint[] | undefined {
+    const state = this.modalityState.get(modality);
+    if (!state) return undefined;
+
+    const currentEpoch = this.calculateEpoch(
+      this.config[modality].epochInterval
+    );
+    if (state.epoch !== currentEpoch) return undefined;
+
+    return state.signature;
   }
 
   public getModalityState(modality: T): ModalityState | undefined {

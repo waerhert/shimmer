@@ -94,6 +94,18 @@ export class LSHDiscovery {
     const state = this.modalityStates.get(modality);
     if (!state) return;
 
+    // Check if this modality's epoch is still current
+    const currentEpoch = this.sketcher.calculateEpoch(
+      (this.sketcher as any).config[modality].epochInterval
+    );
+
+    if (state.epoch !== currentEpoch) {
+      // Epoch has rotated - remove this stale state
+      this.modalityStates.delete(modality);
+      console.log(`[LSHDiscovery] Removed stale epoch state for ${modality}`);
+      return;
+    }
+
     // Announce all tags in parallel
     await Promise.allSettled(
       state.tagCIDs.map(async ({ tag, cid }) => {
@@ -113,6 +125,18 @@ export class LSHDiscovery {
 
   private async discoverPeers(): Promise<void> {
     for (const [modality, state] of this.modalityStates) {
+      // Check if this modality's epoch is still current
+      const currentEpoch = this.sketcher.calculateEpoch(
+        (this.sketcher as any).config[modality].epochInterval
+      );
+
+      if (state.epoch !== currentEpoch) {
+        // Epoch has rotated - remove this stale state
+        this.modalityStates.delete(modality);
+        console.log(`[LSHDiscovery] Removed stale epoch state for ${modality} during discovery`);
+        continue;
+      }
+
       // Fire-and-forget parallel searches for all tags
       state.tagCIDs.forEach(({ tag, cid }) => {
         (async () => {

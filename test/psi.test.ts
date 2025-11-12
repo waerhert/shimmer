@@ -18,8 +18,8 @@ describe("PSI", () => {
     await alice.sketch("words", aliceOriginalItems);
     await bob.sketch("words", bobOriginalItems);
 
-    const sigAlice = alice.getModalityState("words")?.signature;
-    const sigBob = bob.getModalityState("words")?.signature;
+    const sigAlice = alice.getSignature("words");
+    const sigBob = bob.getSignature("words");
 
     // Convert signatures to strings for PSI
     const aliceItems = sigAlice!.map((i) => i.toString(16).padStart(16, "0"));

@@ -10,8 +10,8 @@ describe("Sketcher", () => {
     await alice.sketch('words', ['apple', 'tree', 'house', 'car']);
     await bob.sketch('words', ['apple', 'tree', 'house', 'pet']);
 
-    const aliceTags = alice.getTags().get('words')?.publicTags;
-    const bobTags = bob.getTags().get('words')?.publicTags;
+    const aliceTags = alice.getTags('words')?.publicTags;
+    const bobTags = bob.getTags('words')?.publicTags;
 
     expect(aliceTags).toBeDefined();
     expect(bobTags).toBeDefined();
@@ -32,13 +32,13 @@ describe("Sketcher", () => {
     Date.now = () => 1730898000000; // Fixed timestamp
 
     await sketcher.sketch('words', ['apple', 'tree', 'house', 'car']);
-    const tags1 = sketcher.getTags().get('words')?.publicTags;
+    const tags1 = sketcher.getTags('words')?.publicTags;
 
     // Mock time at 12:10 (different 5m epoch)
     Date.now = () => 1730898600000; // +10 minutes
 
     await sketcher.sketch('words', ['apple', 'tree', 'house', 'car']);
-    const tags2 = sketcher.getTags().get('words')?.publicTags;
+    const tags2 = sketcher.getTags('words')?.publicTags;
 
     // Restore
     Date.now = originalNow;
@@ -60,13 +60,13 @@ describe("Sketcher", () => {
     await sketcher.sketch('words', ['apple', 'tree', 'house', 'car']);
 
     // Tags should be present in same epoch
-    expect(sketcher.getTags().get('words')).toBeDefined();
+    expect(sketcher.getTags('words')).toBeDefined();
 
     // Advance time to next epoch (12:10)
     Date.now = () => 1730898600000;
 
     // getTags() should drop stale modality
-    expect(sketcher.getTags().get('words')).toBeUndefined();
+    expect(sketcher.getTags('words')).toBeUndefined();
 
     Date.now = originalNow;
   });
@@ -80,14 +80,15 @@ describe("Sketcher", () => {
     await sketcher.sketch('wifi', ['SSID_A', 'SSID_B']);
     await sketcher.sketch('words', ['apple', 'tree']);
 
-    const tags = sketcher.getTags();
+    const wifiTags = sketcher.getTags('wifi');
+    const wordsTags = sketcher.getTags('words');
 
     // Both modalities should be present
-    expect(tags.get('wifi')).toBeDefined();
-    expect(tags.get('words')).toBeDefined();
+    expect(wifiTags).toBeDefined();
+    expect(wordsTags).toBeDefined();
 
     // Each should have correct number of bands
-    expect(tags.get('wifi')?.publicTags.length).toBe(32);
-    expect(tags.get('words')?.publicTags.length).toBe(32);
+    expect(wifiTags?.publicTags.length).toBe(32);
+    expect(wordsTags?.publicTags.length).toBe(32);
   });
 });
