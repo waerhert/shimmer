@@ -1,3 +1,4 @@
+import { EventEmitter } from "node:events";
 import { lshTags, minHash, type Tags } from "./crypto.js";
 
 interface ModalityConfig {
@@ -31,11 +32,16 @@ export interface ModalityState {
   items: string[];
 }
 
-export class Sketcher<T extends string = DefaultModalities> {
+interface SketcherEventMap {
+  sketch: [data: { modality: string; modalityState: ModalityState }];
+}
+
+export class Sketcher<T extends string = DefaultModalities> extends EventEmitter<SketcherEventMap> {
   private config: SketcherConfig<T>;
   private modalityState = new Map<T, ModalityState>();
 
   constructor(config?: SketcherConfig<T>) {
+    super();
     this.config = config ?? DEFAULTCONFIG as SketcherConfig<T>;
   }
 
@@ -52,6 +58,11 @@ export class Sketcher<T extends string = DefaultModalities> {
       tags,
       epoch: epoch,
       items,
+    });
+
+    this.emit('sketch', {
+      modality,
+      modalityState: this.modalityState.get(modality)!
     });
   }
 

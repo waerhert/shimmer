@@ -4,7 +4,7 @@ import {
   removePublicAddressesMapper,
 } from "@libp2p/kad-dht";
 import { createLibp2p } from "libp2p";
-import { peerIdFromString } from "@libp2p/peer-id";
+import { peerIdFromPublicKey, peerIdFromString } from "@libp2p/peer-id";
 import { ping } from "@libp2p/ping";
 import { identify } from "@libp2p/identify";
 import { tcp } from "@libp2p/tcp";
@@ -14,22 +14,18 @@ import { bootstrap } from "@libp2p/bootstrap";
 import { sleep } from "../util.js";
 import { generateKeyPair, generateKeyPairFromSeed } from "@libp2p/crypto/keys";
 import { DHTDiscovery } from "../dht-discovery.js";
-import { lshTags } from "../crypto.js";
 import { Sketcher } from "../sketcher.js";
 import { tagToCID } from "../p2p.js";
 import { aminoBootstrappers } from "../amino-bootstrappers.js";
 import { identities, localMultiAddrFromIdentity } from "./id.js";
 import { PSIProtocol } from "../psi-protocol.js";
 import { LSHDiscovery } from "../lsh-discovery.js";
-// import { CID } from "multiformats/cid";
-// import * as raw from "multiformats/codecs/raw";
-// import { sha256 } from "multiformats/hashes/sha2";
 
 const node = await createLibp2p({
-  privateKey: identities.two.key,
+  privateKey: identities.three.key,
   addresses: {
     // add a listen address (localhost) to accept TCP connections on a random port
-    listen: [`/ip4/127.0.0.1/tcp/${identities.two.port}`],
+    listen: [`/ip4/127.0.0.1/tcp/${identities.three.port}`],
   },
   transports: [tcp()],
   connectionEncrypters: [noise()],
@@ -59,14 +55,18 @@ const node = await createLibp2p({
 
 const sketcher = new Sketcher();
 const PSI = new PSIProtocol(node, sketcher);
-await sketcher.sketch("words", ["1", "2", "3", "4"]);
+
+await sketcher.sketch('words', ['1', '2', '3'])
 
 // start libp2p
 await node.start();
 
 // Rendezvous-based peer discovery (equivalent to Go's drouting + dutil)
-const discovery = new DHTDiscovery(node, "/shimmer/peers/1.0.0");
+//const discovery = new DHTDiscovery(node, "/shimmer/peers/1.0.0");
 //await discovery.startPeriodicDiscovery();
+
+
+// await PSI.initiatePSI(peerIdFromPublicKey(identities.two.key.publicKey).toString(), 'words');
 
 const lsh = new LSHDiscovery(node, sketcher, {
   onPeerDiscovered: () => {
@@ -78,5 +78,7 @@ lsh.start();
 
 await sketcher.sketch("words", ["1", "2", "3", "4"]);
 
+
 // Keep running
-console.log("\nNode TWO is running. Press Ctrl+C to stop.");
+console.log("\nNode THREE is running. Press Ctrl+C to stop.");
+await sleep(1000000);
