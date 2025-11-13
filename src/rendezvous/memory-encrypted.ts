@@ -24,10 +24,8 @@ export class InMemoryEncryptedRendezVous implements RendezVous {
   async announce(
     tags: Tags,
     peerInfo: PeerInfo,
-    ttlSeconds: number
+    expiresAt: number
   ): Promise<void> {
-    const expiresAt = Date.now() + ttlSeconds * 1000;
-
     // Announce to all publicTags, encrypting with corresponding preImages
     for (let i = 0; i < tags.publicTags.length; i++) {
       const publicTag = tags.publicTags[i]!;
@@ -51,7 +49,7 @@ export class InMemoryEncryptedRendezVous implements RendezVous {
    * Only returns peers that can be successfully decrypted
    */
   async discover(tags: Tags): Promise<PeerDiscoveryResult[]> {
-    const found = new Map<string, PeerDiscoveryResult>();
+    const results: PeerDiscoveryResult[] = [];
     const now = Date.now();
 
     // Search by publicTags, decrypting with corresponding preImages
@@ -73,18 +71,15 @@ export class InMemoryEncryptedRendezVous implements RendezVous {
         // Try to decrypt with this preImage
         const decrypted = await decryptPeerInfo(encryptedPeerInfo, preImage);
         if (decrypted) {
-          const peerId = decrypted.id.toString();
-          if (!found.has(peerId)) {
-            found.set(peerId, {
-              peerInfo: decrypted,
-              matchedTag: publicTag
-            });
-          }
+          results.push({
+            peerInfo: decrypted,
+            publicTag: publicTag
+          });
         }
       }
     }
 
-    return Array.from(found.values());
+    return results;
   }
 
   private cleanup(): void {

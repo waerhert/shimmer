@@ -63,6 +63,7 @@ export async function sha256base64url(...args: string[]): Promise<string> {
 export interface Tags {
   publicTags: string[];
   preImages: string[];
+  expiresAt: number;  // Unix timestamp (ms) when tags expire
 }
 /**
  * Generate LSH (Locality-Sensitive Hashing) tags from a MinHash signature.
@@ -73,17 +74,20 @@ export interface Tags {
  * @param signature - MinHash signature (array of k bigints)
  * @param bands - Number of bands to divide signature into
  * @param salt - Epoch nonce for privacy (rotates to invalidate old tags)
+ * @param expiresAt - Unix timestamp (ms) when these tags expire
  * @returns Array of base64url-encoded tags, one per band
  * @throws Error if signature.length is not divisible by bands
  */
 export async function lshTags(
   signature: bigint[],
   bands: number,
-  salt: string
+  salt: string,
+  expiresAt: number
 ): Promise<Tags> {
   const tags: Tags = {
     publicTags: [],
     preImages: [],
+    expiresAt,
   };
   const rows = signature.length / bands;
 

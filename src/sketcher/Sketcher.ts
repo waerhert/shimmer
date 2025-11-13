@@ -49,9 +49,13 @@ export class Sketcher<T extends string = DefaultModalities> extends EventEmitter
     const modalityConfig = this.config[modality];
     const epoch = this.calculateEpoch(modalityConfig.epochInterval);
 
+    // Calculate when tags expire (next epoch boundary)
+    const intervalSeconds = this.parseIntervalSeconds(modalityConfig.epochInterval);
+    const expiresAt = (parseInt(epoch) + intervalSeconds) * 1000;
+
     const salt = `${modality}:${epoch}`;
     const signature = await minHash(items, modalityConfig.k, salt);
-    const tags = await lshTags(signature, modalityConfig.bands, salt);
+    const tags = await lshTags(signature, modalityConfig.bands, salt, expiresAt);
 
     this.modalityState.set(modality, {
       signature,
@@ -64,6 +68,27 @@ export class Sketcher<T extends string = DefaultModalities> extends EventEmitter
       modality,
       modalityState: this.modalityState.get(modality)!
     });
+  }
+
+  private parseIntervalSeconds(interval: string): number {
+    const SECONDS_PER_UNIT = {
+      s: 1,
+      m: 60,
+      h: 3600,
+      d: 86400,
+    } as const;
+
+    const regex = /^(\d+)(s|m|h|d)$/;
+    const match = regex.exec(interval);
+
+    if (!match) {
+      throw new Error(
+        `Invalid interval format. Expected format like '5m' or '30s', but got '${interval}'`
+      );
+    }
+
+    const [, amount, unit] = match;
+    return parseInt(amount!) * SECONDS_PER_UNIT[unit as keyof typeof SECONDS_PER_UNIT];
   }
 
   public getTags(modality: T): Tags | undefined {

@@ -24,9 +24,8 @@ export class InMemoryRendezVous implements RendezVous {
   public async announce(
     tags: Tags,
     peerInfo: PeerInfo,
-    ttlSeconds: number
+    expiresAt: number
   ): Promise<void> {
-    const expiresAt = Date.now() + ttlSeconds * 1000;
     const peerId = peerInfo.id.toString();
 
     // Announce to all publicTags (ignore preImages - no encryption)
@@ -43,25 +42,25 @@ export class InMemoryRendezVous implements RendezVous {
   }
 
   public async discover(tags: Tags): Promise<PeerDiscoveryResult[]> {
-    const found = new Map<string, PeerDiscoveryResult>();
+    const results: PeerDiscoveryResult[] = [];
     const now = Date.now();
 
     // Search by publicTags (ignore preImages - no decryption needed)
     for (const tag of tags.publicTags) {
       const entries = this.registry.get(tag);
       if (entries) {
-        for (const [peerId, { peerInfo, expiresAt }] of entries) {
-          if (expiresAt > now && !found.has(peerId)) {
-            found.set(peerId, {
+        for (const [, { peerInfo, expiresAt }] of entries) {
+          if (expiresAt > now) {
+            results.push({
               peerInfo,
-              matchedTag: tag,
+              publicTag: tag,
             });
           }
         }
       }
     }
 
-    return Array.from(found.values());
+    return results;
   }
 
   private cleanup(): void {
