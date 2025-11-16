@@ -78,7 +78,7 @@ export interface Tags {
  * @returns Array of base64url-encoded tags, one per band
  * @throws Error if signature.length is not divisible by bands
  */
-export async function lshTags(
+export async function LSH(
   signature: bigint[],
   bands: number,
   salt: string,

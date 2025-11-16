@@ -13,7 +13,7 @@ export { shimmer, Shimmer, type ShimmerInit, type ShimmerComponents, type Shimme
 // Sketcher
 export { Sketcher, type SketcherConfig, type ModalityConfig } from "./sketcher/sketcher.js";
 export { Sketch } from "./sketcher/sketch.js";
-export { type Tags } from "./sketcher/crypto.js";
+export { type Tags } from "./sketcher/lsh.js";
 
 // Peer management
 export { ProximityPeer } from "./peers/peer.js";

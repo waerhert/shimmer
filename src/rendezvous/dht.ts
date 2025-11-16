@@ -1,11 +1,11 @@
 import type { PeerInfo } from "@libp2p/interface";
-import type { Tags } from "../sketcher/crypto.js";
+import type { Tags } from "../sketcher/lsh.js";
 import type { RendezVous, PeerDiscoveryResult } from "./interface.js";
-import { kadDHT } from "@libp2p/kad-dht";
-import type { KadDHT, KadDHTComponents } from "@libp2p/kad-dht";
+import { kadDHT, type KadDHT, type KadDHTComponents } from "@libp2p/kad-dht";
 import { CID } from "multiformats/cid";
 import * as raw from "multiformats/codecs/raw";
 import { sha256 } from "multiformats/hashes/sha2";
+import type { ShimmerComponents } from "../shimmer.js";
 
 /**
  * Wait until a condition function returns true
@@ -104,9 +104,9 @@ export interface DHTRendezVousConfig {
 export class DHTRendezVous implements RendezVous {
   private dht: KadDHT;
   private started = false;
-  private components: KadDHTComponents;
+  private components: ShimmerComponents;
 
-  constructor(components: KadDHTComponents, config?: DHTRendezVousConfig) {
+  constructor(components: ShimmerComponents, config?: DHTRendezVousConfig) {
     const mergedConfig = {
       protocol: config?.protocol ?? '/shimmer/kad/1.0.0',
       provideValidity: config?.provideValidity ?? 300,  // 5 minutes (in seconds)
@@ -140,7 +140,7 @@ export class DHTRendezVous implements RendezVous {
 
       // Network positioning - query for own ID to maintain routing table health
       querySelfInterval: 30_000,  // 30 seconds
-    })(components);
+    })(components as KadDHTComponents);
 
     this.components = components;
   }

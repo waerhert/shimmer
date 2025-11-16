@@ -1,5 +1,5 @@
 import { EventEmitter } from "node:events";
-import { lshTags, minHash, type Tags } from "./crypto.js";
+import { LSH, minHash, type Tags } from "./lsh.js";
 import { Sketch } from "./sketch.js";
 
 export interface ModalityConfig {
@@ -69,7 +69,7 @@ export class Sketcher<
     const expiresAt = (parseInt(epoch) + intervalSeconds) * 1000;
     const salt = `${modality}:${epoch}`;
     const signature = await minHash(items, modalityConfig.k, salt);
-    const tags = await lshTags(
+    const tags = await LSH(
       signature,
       modalityConfig.bands,
       salt,

@@ -10,6 +10,7 @@ import { InMemoryRendezVous } from "./memory.js";
 import { DHTRendezVous, type DHTRendezVousConfig } from "./dht.js";
 import type { RendezVous } from "./interface.js";
 import type { KadDHTComponents } from "@libp2p/kad-dht";
+import type { ShimmerComponents } from "../shimmer.js";
 
 /**
  * Create an HTTP rendezvous client with encryption
@@ -115,7 +116,7 @@ export function memoryRendezvousPlain(): RendezVous {
  * });
  * ```
  */
-export function dhtRendezvous<T extends KadDHTComponents = KadDHTComponents>(
+export function dhtRendezvous<T extends ShimmerComponents = ShimmerComponents>(
   config?: DHTRendezVousConfig
 ): (components: T) => RendezVous {
   return (components: T) => new DHTRendezVous(components, config);

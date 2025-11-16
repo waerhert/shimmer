@@ -1,5 +1,5 @@
 import type { PeerInfo } from "@libp2p/interface";
-import type { Tags } from "../sketcher/crypto.js";
+import type { Tags } from "../sketcher/lsh.js";
 
 export interface PeerDiscoveryResult {
   peerInfo: PeerInfo;

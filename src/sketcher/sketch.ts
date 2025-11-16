@@ -1,4 +1,4 @@
-import type { Tags } from "./crypto.js";
+import type { Tags } from "./lsh.js";
 
 export interface SketchConfig {
   id: string;
