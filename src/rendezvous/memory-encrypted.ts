@@ -82,6 +82,15 @@ export class InMemoryEncryptedRendezVous implements RendezVous {
     return results;
   }
 
+  /**
+   * Withdraw announcement for tags
+   * No-op for in-memory - cleanup timer handles expiry automatically
+   */
+  public async withdraw(_tags: Tags): Promise<void> {
+    // Cleanup timer handles expiry based on expiresAt timestamp
+    // No action needed
+  }
+
   private cleanup(): void {
     const now = Date.now();
     for (const tag in this.registry) {

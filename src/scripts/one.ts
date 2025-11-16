@@ -6,11 +6,10 @@ import { tcp } from "@libp2p/tcp";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { sleep } from "../util.js";
-import { generateKeyPairFromSeed } from "@libp2p/crypto/keys";
-import { DHTDiscovery } from "../dht-discovery.js";
-import { peerIdFromPublicKey } from "@libp2p/peer-id";
 import { identities } from "./id.js";
 import type { PeerInfo } from '@libp2p/interface';
+import { dhtRendezvous } from "../rendezvous/factories.js";
+import { shimmer } from "../shimmer.js";
 
 
 const node = await createLibp2p({
@@ -23,13 +22,10 @@ const node = await createLibp2p({
   connectionEncrypters: [noise()],
   streamMuxers: [yamux()],
   services: {
-    dht: kadDHT({
-      protocol: '/shimmer/kad/1.0.0',
-      peerInfoMapper: (peer) => {
-       // console.log(peer)
-        return removePublicAddressesMapper(peer)
-      },
-      clientMode: false
+    shimmer: shimmer({
+      rendezvous: dhtRendezvous({
+        peerInfoMapper: removePublicAddressesMapper,
+      })
     }),
     ping: ping(),
     identify: identify(),
@@ -38,6 +34,8 @@ const node = await createLibp2p({
 
 // start libp2p
 await node.start();
+await node.services.shimmer.start();
+
 console.log("libp2p has started");
 
 // print out listening addresses
@@ -55,11 +53,63 @@ node.addEventListener('peer:discovery', (evt) => {
   console.log("✓ Discovered peer:", evt.detail.id.toString());
 });
 
-// Rendezvous-based peer discovery (equivalent to Go's drouting + dutil)
-const discovery = new DHTDiscovery(node, "/shimmer/peers/1.0.0");
-console.log("\n📢 Starting DHT-based peer discovery");
-await discovery.startPeriodicDiscovery();
+// Monitor provider records
+console.log('\n[Monitor] Setting up provider monitoring...');
+const dht = (node.services.shimmer as any).rendezvous.getDHT();
+console.log('[Monitor] DHT obtained:', typeof dht);
+
+// Track provider record counts over time
+let previousCount = 0;
+const startTime = Date.now();
+
+// Periodic provider record monitoring
+setInterval(async () => {
+  try {
+    const providers = (dht as any).providers;
+
+    if (providers && providers.datastore) {
+      const datastore = providers.datastore;
+
+      // Count provider records
+      let count = 0;
+      const uniqueCIDs = new Set<string>();
+      const peerIds = new Set<string>();
+
+      try {
+        for await (const { key } of datastore.query({ prefix: providers.datastorePrefix })) {
+          count++;
+          const keyStr = key.toString();
+
+          // Extract CID and PeerID from key format: /dht/provider/{CID}/{PeerID}
+          const parts = keyStr.split('/');
+          if (parts.length >= 4) {
+            uniqueCIDs.add(parts[3]); // CID part
+            if (parts.length >= 5) {
+              peerIds.add(parts[4]); // PeerID part
+            }
+          }
+        }
+
+        const elapsed = Math.floor((Date.now() - startTime) / 1000);
+        const change = count - previousCount;
+        const changeStr = change > 0 ? `+${change}` : change < 0 ? `${change}` : '=';
+
+        console.log(
+          `[${elapsed}s] Provider Records: ${count} (${changeStr}) | ` +
+          `Unique CIDs: ${uniqueCIDs.size} | ` +
+          `Unique Peers: ${peerIds.size}`
+        );
+
+        previousCount = count;
+      } catch (queryErr: any) {
+        console.log(`[Monitor] Error querying: ${queryErr.message}`);
+      }
+    }
+  } catch (err: any) {
+    console.error(`[Monitor] Error: ${err.message}`);
+  }
+}, 5000); // Check every 5 seconds
 
 // Keep running
-console.log("\nNode ONE is running. Press Ctrl+C to stop.");
+console.log("\nNode ONE is running as bootstrap. Press Ctrl+C to stop.");
 await sleep(1000000);

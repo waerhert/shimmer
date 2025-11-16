@@ -107,6 +107,15 @@ export class HTTPEncryptedRendezVous implements RendezVous {
 
     return results;
   }
+
+  /**
+   * Withdraw announcement for tags
+   * No-op for HTTP - server handles expiry automatically
+   */
+  public async withdraw(_tags: Tags): Promise<void> {
+    // HTTP server handles expiry based on expiresAt timestamp
+    // No action needed on client side
+  }
 }
 
 // Helper: Convert Uint8Array to base64

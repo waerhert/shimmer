@@ -1,8 +1,4 @@
-import {
-  kadDHT,
-  removePrivateAddressesMapper,
-  removePublicAddressesMapper,
-} from "@libp2p/kad-dht";
+import { kadDHT, removePublicAddressesMapper } from "@libp2p/kad-dht";
 import { createLibp2p } from "libp2p";
 import { ping } from "@libp2p/ping";
 import { identify } from "@libp2p/identify";
@@ -10,14 +6,10 @@ import { tcp } from "@libp2p/tcp";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { bootstrap } from "@libp2p/bootstrap";
-import { DHTDiscovery } from "../dht-discovery.js";
-import { Sketcher } from "../sketcher/Sketcher.js";
+import { sleep, words1 } from "../util.js";
 import { identities, localMultiAddrFromIdentity } from "./id.js";
-import { PSIProtocol } from "../psi/protocol.js";
-import { LSHDiscovery } from "../lsh-discovery.js";
-// import { CID } from "multiformats/cid";
-// import * as raw from "multiformats/codecs/raw";
-// import { sha256 } from "multiformats/hashes/sha2";
+import { shimmer } from "../shimmer.js";
+import { dhtRendezvous } from "../rendezvous/factories.js";
 
 const node = await createLibp2p({
   privateKey: identities.two.key,
@@ -29,12 +21,12 @@ const node = await createLibp2p({
   connectionEncrypters: [noise()],
   streamMuxers: [yamux()],
   services: {
-    dht: kadDHT({
-      // protocol: "/shimmer/kad/1.0.0",
-      protocol: "/shimmer/kad/1.0.0",
-      //peerInfoMapper: removePrivateAddressesMapper,
-      peerInfoMapper: removePublicAddressesMapper,
-      clientMode: false,
+    shimmer: shimmer({
+      rendezvous: dhtRendezvous({
+        peerInfoMapper: removePublicAddressesMapper,
+      }),
+      autoDiscoverInterval: 5000,
+      autoAnnounce: true,
     }),
     ping: ping(),
     identify: identify(),
@@ -51,25 +43,20 @@ const node = await createLibp2p({
   ],
 });
 
-const sketcher = new Sketcher();
-const PSI = new PSIProtocol(node, sketcher);
-await sketcher.sketch("words", ["1", "2", "3", "4"]);
-
 // start libp2p
 await node.start();
+await node.services.shimmer.start();
 
-// Rendezvous-based peer discovery (equivalent to Go's drouting + dutil)
-const discovery = new DHTDiscovery(node, "/shimmer/peers/1.0.0");
-//await discovery.startPeriodicDiscovery();
+node.services.shimmer.sketch("words", words1);
 
-const lsh = new LSHDiscovery(node, sketcher, {
-  onPeerDiscovered: () => {
-    //console.log("TWO discovered peer")
-  }
+node.addEventListener("peer:connect", (evt) => {
+  console.log("Peer connected:", evt.detail.toString());
 });
-lsh.start();
 
-await sketcher.sketch("words", ["1", "2", "3", "4"]);
+node.addEventListener("peer:discovery", (evt) => {
+  console.log("✓ Discovered peer:", evt.detail.id.toString());
+});
 
 // Keep running
-console.log("\nNode TWO is running. Press Ctrl+C to stop.");
+console.log("\nNode two is running. Press Ctrl+C to stop.");
+await sleep(1000000);

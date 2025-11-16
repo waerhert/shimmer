@@ -38,16 +38,16 @@ export class DHTDiscovery {
    */
   async advertise(): Promise<void> {
     const cid = await this.ensureInitialized();
+    console.log('[DHTDiscovery] Starting advertise for CID:', cid.toString());
     try {
+      let eventCount = 0;
       for await (const event of this.node.services.dht.provide(cid)) {
-        // Iterate through all events to complete the advertisement
-        //console.log("Self advertised")
-        if (event.name !== 'QUERY_ERROR') {
-          // Log non-error events if needed
-        }
+        eventCount++;
+        console.log(`[DHTDiscovery] Provide event #${eventCount}:`, event.name);
       }
+      console.log(`[DHTDiscovery] Advertise completed with ${eventCount} events`);
     } catch (err) {
-      console.error('Failed to advertise on DHT:', err);
+      console.error('[DHTDiscovery] Failed to advertise on DHT:', err);
     }
   }
 
@@ -58,25 +58,28 @@ export class DHTDiscovery {
    */
   async *findPeers(): AsyncGenerator<string> {
     const cid = await this.ensureInitialized();
+    console.log('[DHTDiscovery] Finding providers for CID:', cid.toString());
     try {
       for await (const event of this.node.services.dht.findProviders(cid)) {
         if (event.name === 'PROVIDER') {
+          console.log(`[DHTDiscovery] Found ${event.providers.length} providers`);
           for (const provider of event.providers) {
             if (!provider.id.equals(this.node.peerId)) {
+              console.log('[DHTDiscovery] Discovered peer:', provider.id.toString());
               yield provider.id.toString();
 
               // Attempt to dial discovered peer
               try {
                 await this.node.dial(provider.id);
               } catch (err) {
-                // Peer might not be dialable, that's okay
+                console.log('[DHTDiscovery] Could not dial peer:', err);
               }
             }
           }
         }
       }
     } catch (err) {
-      // End iteration on error
+      console.error('[DHTDiscovery] Error during findPeers:', err);
     }
   }
 
@@ -89,26 +92,31 @@ export class DHTDiscovery {
     // Ensure CID is initialized
     await this.ensureInitialized();
 
+    console.log('[DHTDiscovery] Waiting for at least one connected peer...');
     // Wait for at least one peer before advertising (otherwise provide() yields no events)
     const waitForPeers = async () => {
       while (this.node.getPeers().length === 0) {
+        console.log('[DHTDiscovery] No peers yet, waiting...');
         await new Promise(resolve => setTimeout(resolve, 1000));
       }
+      console.log('[DHTDiscovery] Connected peers:', this.node.getPeers().length);
     };
 
     // Wait for peers, then do initial advertisement
     await waitForPeers();
-    this.advertise();
+    await this.advertise();
 
     // Periodic re-advertisement
     this.advertiseInterval = setInterval(() => {
+      console.log('[DHTDiscovery] Periodic re-advertisement');
       this.advertise();
     }, advertiseInterval);
 
     // Periodic peer discovery
     const runFindPeers = async () => {
+      console.log('[DHTDiscovery] Running periodic peer discovery');
       for await (const peerId of this.findPeers()) {
-       // console.log('Discovered peer via DHT:', peerId);
+        console.log('[DHTDiscovery] Discovered peer via DHT:', peerId);
       }
     };
 

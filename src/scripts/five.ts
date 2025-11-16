@@ -9,23 +9,21 @@ import { bootstrap } from "@libp2p/bootstrap";
 import { sleep, words2 } from "../util.js";
 import { identities, localMultiAddrFromIdentity } from "./id.js";
 import { shimmer } from "../shimmer.js";
-import { dhtRendezvous } from "../rendezvous/factories.js";
+import { dhtRendezvous, httpRendezvous } from "../rendezvous/factories.js";
 
 const node = await createLibp2p({
-  privateKey: identities.three.key,
+  privateKey: identities.five.key,
   addresses: {
     // add a listen address (localhost) to accept TCP connections on a random port
-    listen: [`/ip4/127.0.0.1/tcp/${identities.three.port}`],
+    listen: [`/ip4/127.0.0.1/tcp/${identities.five.port}`],
   },
   transports: [tcp()],
   connectionEncrypters: [noise()],
   streamMuxers: [yamux()],
   services: {
     shimmer: shimmer({
-      rendezvous: dhtRendezvous({
-        peerInfoMapper: removePublicAddressesMapper,
-      }),
-      autoDiscoverInterval: 5000,
+      rendezvous: httpRendezvous('http://localhost:8771'),
+      autoDiscoverInterval: 1000,
       autoAnnounce: true,
     }),
     ping: ping(),
@@ -58,5 +56,5 @@ node.addEventListener('peer:discovery', (evt) => {
 });
 
 // Keep running
-console.log("\nNode THREE is running. Press Ctrl+C to stop.");
+console.log("\nNode four is running. Press Ctrl+C to stop.");
 await sleep(1000000);

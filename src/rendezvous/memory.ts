@@ -14,7 +14,7 @@ export class InMemoryRendezVous implements RendezVous {
       }
     >
   >();
-  private cleanupTimer: NodeJS.Timeout;
+  private cleanupTimer: ReturnType<typeof setInterval>;
 
   constructor() {
     // Cleanup expired entries every 30 seconds
@@ -61,6 +61,11 @@ export class InMemoryRendezVous implements RendezVous {
     }
 
     return results;
+  }
+
+  public async withdraw(_tags: Tags): Promise<void> {
+    // Cleanup timer handles expiry based on expiresAt timestamp
+    // No action needed
   }
 
   private cleanup(): void {

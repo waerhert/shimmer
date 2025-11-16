@@ -1,7 +1,7 @@
 import { EventEmitter } from "node:events";
 import { lshTags, minHash, type Tags } from "./crypto.js";
 
-interface ModalityConfig {
+export interface ModalityConfig {
   k: number; // number of hashfunctions in minhash
   bands: number; // number of bands in LSH
   epochInterval: string; // '5m'
@@ -30,10 +30,12 @@ export interface ModalityState {
   tags: Tags;
   epoch: string;
   items: string[];
+  expiryTimer?: ReturnType<typeof setTimeout>;
 }
 
 interface SketcherEventMap {
   sketch: [data: { modality: string; modalityState: ModalityState }];
+  expire: [data: { modality: string; oldTags: Tags; oldEpoch: string }];
 }
 
 export class Sketcher<T extends string = DefaultModalities> extends EventEmitter<SketcherEventMap> {
@@ -49,6 +51,23 @@ export class Sketcher<T extends string = DefaultModalities> extends EventEmitter
     const modalityConfig = this.config[modality];
     const epoch = this.calculateEpoch(modalityConfig.epochInterval);
 
+    // If there's existing state for this modality, emit expire event for old tags
+    // (they're being replaced by new sketch)
+    const existingState = this.modalityState.get(modality);
+    if (existingState) {
+      // Clear old expiry timer
+      if (existingState.expiryTimer) {
+        clearTimeout(existingState.expiryTimer);
+      }
+
+      // Emit expire event for old tags
+      this.emit('expire', {
+        modality,
+        oldTags: existingState.tags,
+        oldEpoch: existingState.epoch
+      });
+    }
+
     // Calculate when tags expire (next epoch boundary)
     const intervalSeconds = this.parseIntervalSeconds(modalityConfig.epochInterval);
     const expiresAt = (parseInt(epoch) + intervalSeconds) * 1000;
@@ -57,11 +76,27 @@ export class Sketcher<T extends string = DefaultModalities> extends EventEmitter
     const signature = await minHash(items, modalityConfig.k, salt);
     const tags = await lshTags(signature, modalityConfig.bands, salt, expiresAt);
 
+    // Set timeout for exact expiry time
+    const timeUntilExpiry = expiresAt - Date.now();
+    const expiryTimer = setTimeout(() => {
+      // Emit expire event and clean up
+      const state = this.modalityState.get(modality);
+      if (state && state.epoch === epoch) {
+        this.emit('expire', {
+          modality,
+          oldTags: state.tags,
+          oldEpoch: state.epoch
+        });
+        this.modalityState.delete(modality);
+      }
+    }, timeUntilExpiry);
+
     this.modalityState.set(modality, {
       signature,
       tags,
       epoch: epoch,
       items,
+      expiryTimer
     });
 
     this.emit('sketch', {
@@ -154,5 +189,24 @@ export class Sketcher<T extends string = DefaultModalities> extends EventEmitter
     const alignedEpoch = currentTimestamp - remainder;
 
     return alignedEpoch.toString();
+  }
+
+  public getModalities() {
+    return Object.keys(this.config);
+  }
+
+  /**
+   * Clean up all timers and resources
+   * Should be called when Sketcher is no longer needed
+   */
+  public destroy(): void {
+    // Clear all expiry timers
+    for (const state of this.modalityState.values()) {
+      if (state.expiryTimer) {
+        clearTimeout(state.expiryTimer);
+      }
+    }
+    // Clear all state
+    this.modalityState.clear();
   }
 }

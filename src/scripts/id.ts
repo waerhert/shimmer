@@ -13,23 +13,22 @@ export async function seedFromPhrase(str: string): Promise<Uint8Array> {
   );
 }
 
-export function localMultiAddrFromIdentity(id: { key: PrivateKey, port: number}): string {
-  return `/ip4/127.0.0.1/tcp/${id.port}/p2p/${peerIdFromPublicKey(id.key.publicKey)}`;
+export function localMultiAddrFromIdentity(id: {
+  key: PrivateKey;
+  port: number;
+}): string {
+  return `/ip4/127.0.0.1/tcp/${id.port}/p2p/${peerIdFromPublicKey(
+    id.key.publicKey
+  )}`;
 }
 
 export const identities = {
   one: {
-    key: await generateKeyPairFromSeed(
-      "Ed25519",
-      await seedFromPhrase("one")
-    ),
+    key: await generateKeyPairFromSeed("Ed25519", await seedFromPhrase("one")),
     port: 4526,
   },
   two: {
-    key: await generateKeyPairFromSeed(
-      "Ed25519",
-      await seedFromPhrase("two")
-    ),
+    key: await generateKeyPairFromSeed("Ed25519", await seedFromPhrase("two")),
     port: 4527,
   },
   three: {
@@ -38,5 +37,13 @@ export const identities = {
       await seedFromPhrase("three")
     ),
     port: 4528,
+  },
+  four: {
+    key: await generateKeyPairFromSeed("Ed25519", await seedFromPhrase("four")),
+    port: 4529,
+  },
+  five: {
+    key: await generateKeyPairFromSeed("Ed25519", await seedFromPhrase("five")),
+    port: 4530,
   },
 };

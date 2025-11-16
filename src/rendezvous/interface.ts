@@ -30,6 +30,17 @@ export interface RendezVous {
    * @returns Peers found + which publicTag matched
    */
   discover(tags: Tags): Promise<PeerDiscoveryResult[]>;
+
+  /**
+   * Withdraw announcement for tags (stop being discoverable)
+   * Call this when epoch expires or content changes
+   *
+   * For HTTP/memory: No-op (server handles expiry)
+   * For DHT: Cancels provider records to stop re-announcing
+   *
+   * @param tags - The tags to withdraw announcement for
+   */
+  withdraw(tags: Tags): Promise<void>;
 }
 
 /**
