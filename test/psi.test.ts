@@ -1,6 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { PSIServer, PSIClient } from "../src/psi/psi.js";
-import { Sketcher } from "../src/sketcher/Sketcher.js";
+import { Sketcher } from "../src/sketcher/sketcher.js";
 
 describe("PSI", () => {
   it("should compute intersection size on MinHash signatures", async () => {
@@ -15,22 +15,22 @@ describe("PSI", () => {
     const bobOriginalItems = [...commonItems, ...bobUnique];
     const originalOverlapPercentage = (commonItems.length / aliceOriginalItems.length) * 100;
 
-    await alice.sketch("words", aliceOriginalItems);
-    await bob.sketch("words", bobOriginalItems);
+    const aliceSketch = await alice.sketch("words", aliceOriginalItems);
+    const bobSketch = await bob.sketch("words", bobOriginalItems);
 
-    const sigAlice = alice.getSignature("words");
-    const sigBob = bob.getSignature("words");
+    const sigAlice = aliceSketch.signature;
+    const sigBob = bobSketch.signature;
 
     // Convert signatures to strings for PSI
-    const aliceItems = sigAlice!.map((i) => i.toString(16).padStart(16, "0"));
-    const bobItems = sigBob!.map((i) => i.toString(16).padStart(16, "0"));
+    const aliceItems = sigAlice.map((i) => i.toString(16).padStart(16, "0"));
+    const bobItems = sigBob.map((i) => i.toString(16).padStart(16, "0"));
 
     // Alice creates server, Bob creates client
     const server = new PSIServer();
     const client = new PSIClient();
 
     // Alice: createSetup() -> serialized setup
-    const serializedSetup = server.createSetup(aliceItems, sigBob!.length);
+    const serializedSetup = server.createSetup(aliceItems, sigBob.length);
 
     // Bob: createRequest() -> serialized request
     const serializedRequest = client.createRequest(bobItems);

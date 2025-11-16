@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { Sketcher } from "../src/sketcher/Sketcher.js";
+import { Sketcher } from "../src/sketcher/sketcher.js";
 
 describe("Sketcher", () => {
   it("should produce overlapping tags for Alice and Bob with similar words", async () => {
@@ -10,8 +10,8 @@ describe("Sketcher", () => {
     await alice.sketch('words', ['apple', 'tree', 'house', 'car']);
     await bob.sketch('words', ['apple', 'tree', 'house', 'pet']);
 
-    const aliceTags = alice.getTags('words')?.publicTags;
-    const bobTags = bob.getTags('words')?.publicTags;
+    const aliceTags = alice.getCurrentSketch('words')?.tags.publicTags;
+    const bobTags = bob.getCurrentSketch('words')?.tags.publicTags;
 
     expect(aliceTags).toBeDefined();
     expect(bobTags).toBeDefined();
@@ -32,13 +32,13 @@ describe("Sketcher", () => {
     Date.now = () => 1730898000000; // Fixed timestamp
 
     await sketcher.sketch('words', ['apple', 'tree', 'house', 'car']);
-    const tags1 = sketcher.getTags('words')?.publicTags;
+    const tags1 = sketcher.getCurrentSketch('words')?.tags.publicTags;
 
     // Mock time at 12:10 (different 5m epoch)
     Date.now = () => 1730898600000; // +10 minutes
 
     await sketcher.sketch('words', ['apple', 'tree', 'house', 'car']);
-    const tags2 = sketcher.getTags('words')?.publicTags;
+    const tags2 = sketcher.getCurrentSketch('words')?.tags.publicTags;
 
     // Restore
     Date.now = originalNow;
@@ -60,13 +60,13 @@ describe("Sketcher", () => {
     await sketcher.sketch('words', ['apple', 'tree', 'house', 'car']);
 
     // Tags should be present in same epoch
-    expect(sketcher.getTags('words')).toBeDefined();
+    expect(sketcher.getCurrentSketch('words')).toBeDefined();
 
     // Advance time to next epoch (12:10)
     Date.now = () => 1730898600000;
 
-    // getTags() should drop stale modality
-    expect(sketcher.getTags('words')).toBeUndefined();
+    // getCurrentSketch() should drop stale modality
+    expect(sketcher.getCurrentSketch('words')).toBeUndefined();
 
     Date.now = originalNow;
   });
@@ -80,15 +80,15 @@ describe("Sketcher", () => {
     await sketcher.sketch('wifi', ['SSID_A', 'SSID_B']);
     await sketcher.sketch('words', ['apple', 'tree']);
 
-    const wifiTags = sketcher.getTags('wifi');
-    const wordsTags = sketcher.getTags('words');
+    const wifiSketch = sketcher.getCurrentSketch('wifi');
+    const wordsSketch = sketcher.getCurrentSketch('words');
 
     // Both modalities should be present
-    expect(wifiTags).toBeDefined();
-    expect(wordsTags).toBeDefined();
+    expect(wifiSketch).toBeDefined();
+    expect(wordsSketch).toBeDefined();
 
     // Each should have correct number of bands
-    expect(wifiTags?.publicTags.length).toBe(32);
-    expect(wordsTags?.publicTags.length).toBe(32);
+    expect(wifiSketch?.tags.publicTags.length).toBe(32);
+    expect(wordsSketch?.tags.publicTags.length).toBe(32);
   });
 });

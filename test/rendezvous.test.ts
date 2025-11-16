@@ -1,12 +1,12 @@
 import { describe, it, expect } from "vitest";
-import { Sketcher } from "../src/sketcher/Sketcher.js";
+import { Sketcher } from "../src/sketcher/sketcher.js";
 import { sleep } from "../src/util.js";
 import type { PeerInfo } from "@libp2p/interface";
 import { peerIdFromString } from "@libp2p/peer-id";
 import { multiaddr } from "@multiformats/multiaddr";
 import { InMemoryRendezVous } from '../src/rendezvous/memory.js'
 import { InMemoryEncryptedRendezVous } from '../src/rendezvous/memory-encrypted.js'
-import { Tags } from "../src/sketcher/crypto.js";
+import { Tags } from "../src/sketcher/lsh.js";
 
 // Helper to create mock PeerInfo
 function createMockPeerInfo(id: string, addr: string): PeerInfo {
@@ -25,8 +25,8 @@ describe("InMemoryRendezVous", () => {
     await alice.sketch("words", ["apple", "tree", "house", "car"]);
     await bob.sketch("words", ["apple", "tree", "house", "pet"]);
 
-    const aliceTags = alice.getTags("words");
-    const bobTags = bob.getTags("words");
+    const aliceTags = alice.getCurrentSketch("words")?.tags;
+    const bobTags = bob.getCurrentSketch("words")?.tags;
 
     expect(aliceTags).toBeDefined();
     expect(bobTags).toBeDefined();
@@ -54,8 +54,8 @@ describe("InMemoryRendezVous", () => {
     await alice.sketch("words", ["apple", "tree", "house", "car"]);
     await bob.sketch("words", ["apple", "tree", "house", "pet"]);
 
-    const aliceTags = alice.getTags("words");
-    const bobTags = bob.getTags("words");
+    const aliceTags = alice.getCurrentSketch("words")?.tags;
+    const bobTags = bob.getCurrentSketch("words")?.tags;
 
     expect(aliceTags).toBeDefined();
     expect(bobTags).toBeDefined();
@@ -87,8 +87,8 @@ describe("InMemoryEncryptedRendezVous", () => {
     await alice.sketch("words", ["apple", "tree", "house", "car"]);
     await bob.sketch("words", ["apple", "tree", "house", "pet"]);
 
-    const aliceTags = alice.getTags("words");
-    const bobTags = bob.getTags("words");
+    const aliceTags = alice.getCurrentSketch("words")?.tags;
+    const bobTags = bob.getCurrentSketch("words")?.tags;
 
     expect(aliceTags).toBeDefined();
     expect(bobTags).toBeDefined();
@@ -118,7 +118,7 @@ describe("InMemoryEncryptedRendezVous", () => {
 
     await alice.sketch("words", ["apple", "tree", "house", "car"]);
 
-    const aliceTags = alice.getTags("words");
+    const aliceTags = alice.getCurrentSketch("words")?.tags;
     expect(aliceTags).toBeDefined();
 
     // Alice publishes with encryption
@@ -150,8 +150,8 @@ describe("InMemoryEncryptedRendezVous", () => {
     await alice.sketch("words", ["apple", "tree", "house", "car"]);
     await bob.sketch("words", ["apple", "tree", "house", "pet"]);
 
-    const aliceTags = alice.getTags("words");
-    const bobTags = bob.getTags("words");
+    const aliceTags = alice.getCurrentSketch("words")?.tags;
+    const bobTags = bob.getCurrentSketch("words")?.tags;
 
     expect(aliceTags).toBeDefined();
     expect(bobTags).toBeDefined();
@@ -183,9 +183,9 @@ describe("InMemoryEncryptedRendezVous", () => {
     await bob.sketch("words", ["apple", "tree", "house", "pet"]);
     await carol.sketch("words", ["apple", "tree", "house", "bird"]);
 
-    const aliceTags = alice.getTags("words");
-    const bobTags = bob.getTags("words");
-    const carolTags = carol.getTags("words");
+    const aliceTags = alice.getCurrentSketch("words")?.tags;
+    const bobTags = bob.getCurrentSketch("words")?.tags;
+    const carolTags = carol.getCurrentSketch("words")?.tags;
 
     // Alice and Bob both announce
     const alicePeerInfo = createMockPeerInfo(
