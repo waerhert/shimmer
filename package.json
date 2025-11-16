@@ -1,7 +1,7 @@
 {
   "type": "module",
   "name": "shimmer",
-  "version": "1.0.0",
+  "version": "0.0.1",
   "description": "",
   "main": "index.js",
   "exports": {
@@ -17,9 +17,10 @@
     "build": "tsc",
     "test": "vitest"
   },
-  "author": "",
-  "license": "ISC",
+  "author": "Sven De Waerhert",
+  "license": "MIT",
   "devDependencies": {
+    "@libp2p/crypto": "^5.1.13",
     "@types/node": "^24.10.1",
     "typescript": "^5.9.3",
     "vitest": "^4.0.7"
@@ -30,20 +31,17 @@
     "@hono/node-server": "^1.19.6",
     "@libp2p/bootstrap": "^12.0.8",
     "@libp2p/identify": "^4.0.7",
+    "@libp2p/interface": "^3.1.0",
+    "@libp2p/interface-internal": "^3.0.9",
     "@libp2p/kad-dht": "^16.1.0",
     "@libp2p/peer-id": "^6.0.4",
     "@libp2p/ping": "^3.0.7",
     "@libp2p/tcp": "^11.0.7",
     "@libp2p/utils": "^7.0.7",
+    "@multiformats/multiaddr": "^13.0.1",
     "@openmined/psi.js": "^2.0.6",
-    "cids": "^1.1.9",
     "hono": "^4.10.5",
-    "it-drain": "^3.0.10",
-    "it-length-prefixed-stream": "^2.0.3",
-    "it-pipe": "^3.0.1",
     "libp2p": "^3.1.0",
-    "multiformats": "^13.4.1",
-    "multihashing-async": "^2.1.4",
-    "uint8arrays": "^5.1.0"
+    "multiformats": "^13.4.1"
   }
 }

@@ -1,6 +1,6 @@
 # Shimmer
 
-Proximity-based peer discovery for libp2p using environmental observations.
+Nearby peer discovery through environmental observations
 
 ## ⚠️ Development Status
 
