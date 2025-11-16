@@ -4,8 +4,13 @@ import type {
   Startable,
   PeerDiscovery,
   PeerDiscoveryEvents,
-  Libp2p,
+  PeerStore,
 } from "@libp2p/interface";
+import type {
+  AddressManager,
+  Registrar,
+  ConnectionManager,
+} from "@libp2p/interface-internal";
 import {
   peerDiscoverySymbol,
   serviceCapabilities,
@@ -19,10 +24,15 @@ import { PeerRegistry } from "./peers/registry.js";
 import { ProximityPeer } from "./peers/peer.js";
 import type { Sketch } from "./sketcher/sketch.js";
 
-// ShimmerComponents accepts any libp2p components
-// This allows different rendezvous implementations to access what they need
-export interface ShimmerComponents extends Record<string, any> {
+/**
+ * ShimmerComponents - Explicit libp2p components needed by Shimmer
+ */
+export interface ShimmerComponents {
   peerId: PeerId;
+  addressManager: AddressManager;
+  peerStore: PeerStore;
+  registrar: Registrar;
+  connectionManager: ConnectionManager;
 }
 
 /**
@@ -31,7 +41,7 @@ export interface ShimmerComponents extends Record<string, any> {
  * Pre-instantiated: For rendezvous that don't need libp2p components (memory, HTTP)
  * Factory: For rendezvous that need components (DHT)
  */
-export type RendezvousOption = RendezVous | ((components: any) => RendezVous);
+export type RendezvousOption = RendezVous | ((components: ShimmerComponents) => RendezVous);
 
 export interface ShimmerInit<T extends string = string> {
   /**
@@ -122,7 +132,7 @@ export class Shimmer<T extends string = string>
   private readonly rendezvous: RendezVous;
   private readonly sketcher: Sketcher<T>;
   private readonly psiProtocol: PSIProtocol<T>;
-  private readonly peerRegistry: PeerRegistry; 
+  private readonly peerRegistry: PeerRegistry;
   private readonly autoAnnounce: boolean;
   private readonly autoDiscoverInterval: number | undefined;
   private started = false;
@@ -171,8 +181,8 @@ export class Shimmer<T extends string = string>
       console.log('[Shimmer] Peers:', JSON.stringify(loggable, null, 2));
     }, 4000);
 
-    // Components is the libp2p instance - cast it to access protocol methods
-    this.psiProtocol = new PSIProtocol(components as unknown as Libp2p, this.sketcher);
+    // Pass components directly to PSIProtocol
+    this.psiProtocol = new PSIProtocol(components, this.sketcher);
 
     // Listen for PSI completion events
     this.psiProtocol.on("psi:complete", ({ peer, sketch, result }) => {
@@ -306,7 +316,7 @@ export class Shimmer<T extends string = string>
   private async announceSketch(sketch: Sketch): Promise<void> {
     const peerInfo: PeerInfo = {
       id: this.components.peerId,
-      multiaddrs: [], // TODO: Get from address manager
+      multiaddrs: this.components.addressManager.getAddresses()
     };
 
     await this.rendezvous.announce(sketch.tags, peerInfo, sketch.expiresAt);
@@ -354,12 +364,26 @@ export class Shimmer<T extends string = string>
     }
 
     // Discover peers using sketch tags
-    const rawResults = await this.rendezvous.discover(sketch.tags);
+    const rawResults = await this.rendezvous.discover(sketch.tags); 
 
     const peers: ProximityPeer[] = [];
     const seen = new Set<string>();
 
     for (const result of rawResults) {
+      // Validate results
+      if (!result.peerInfo.id) {
+        continue;
+      }
+
+      if (!result.peerInfo.multiaddrs || !Array.isArray(result.peerInfo.multiaddrs)) {
+        continue;
+      }
+
+      if (Array.isArray(result.peerInfo.multiaddrs) && result.peerInfo.multiaddrs.length === 0) {
+        continue;
+      }
+
+
       // Skip self
       if (result.peerInfo.id.equals(this.components.peerId)) {
         continue;

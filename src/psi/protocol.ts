@@ -1,4 +1,3 @@
-import type { Libp2p } from "libp2p";
 import type { Sketcher } from "../sketcher/sketcher.js";
 import type { Sketch } from "../sketcher/sketch.js";
 import { PSIServer, PSIClient } from "./psi.js";
@@ -10,8 +9,21 @@ import type {
   PeerStore,
   Stream,
 } from "@libp2p/interface";
+import type {
+  Registrar,
+  ConnectionManager,
+} from "@libp2p/interface-internal";
 import { EventEmitter } from "node:events";
 import { ProximityPeer } from "../peers/peer.js";
+
+/**
+ * PSIProtocolComponents - Explicit libp2p components needed by PSIProtocol
+ */
+export interface PSIProtocolComponents {
+  peerStore: PeerStore;
+  registrar: Registrar;
+  connectionManager: ConnectionManager;
+}
 
 const PROTOCOL_ID = "/shimmer/psi/1.0.0";
 const PSI_TIMEOUT_MS = 30000; // 30 seconds timeout for PSI operations
@@ -44,18 +56,18 @@ interface PSIProtocolEventMap {
  * using their MinHash signatures without revealing the actual items.
  */
 export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProtocolEventMap> {
-  private node: Libp2p;
+  private components: PSIProtocolComponents;
   private sketcher: Sketcher<T>;
   private options: Required<PSIProtocolOptions>;
 
   constructor(
-    node: Libp2p,
+    components: PSIProtocolComponents,
     sketcher: Sketcher<T>,
     options: PSIProtocolOptions = {}
   ) {
     super();
 
-    this.node = node;
+    this.components = components;
     this.sketcher = sketcher;
     this.options = {
       similarityThreshold: options.similarityThreshold ?? 50,
@@ -199,13 +211,13 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
 
     try {
       // Check if PSI is already ongoing
-      if (await isOngoing(this.node.peerStore, remotePeerId)) {
+      if (await isOngoing(this.components.peerStore, remotePeerId)) {
         stream.close();
         throw new Error(`PSI already ongoing with peer ${remotePeerId.toString()}`);
       }
 
       // Mark as ongoing to prevent race conditions
-      await markOngoing(this.node.peerStore, remotePeerId);
+      await markOngoing(this.components.peerStore, remotePeerId);
 
       const lp = lpStream(stream);
 
@@ -272,7 +284,7 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
       }
 
       try {
-        await unmarkOngoing(this.node.peerStore, remotePeerId);
+        await unmarkOngoing(this.components.peerStore, remotePeerId);
       } catch (unmarkErr) {
         console.warn(`[PSIProtocol] Error unmarking ongoing:`, unmarkErr);
       }
@@ -280,7 +292,7 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
   }
 
   private registerProtocolHandler(): void {
-    (this.node as any).registrar.handle(
+    this.components.registrar.handle(
       PROTOCOL_ID,
       async (stream: Stream, connection: Connection) => {
         try {
@@ -317,15 +329,15 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
 
     try {
       // Check if PSI is already ongoing
-      if (await isOngoing(this.node.peerStore, remotePeerId)) {
+      if (await isOngoing(this.components.peerStore, remotePeerId)) {
         throw new Error(`PSI already ongoing with peer ${remotePeerId.toString()}`);
       }
 
       // Mark as ongoing to prevent race conditions
-      await markOngoing(this.node.peerStore, remotePeerId);
+      await markOngoing(this.components.peerStore, remotePeerId);
 
       // Open stream to remote peer
-      stream = await (this.node as any).connectionManager.openStream(
+      stream = await this.components.connectionManager.openStream(
         remotePeerId,
         [PROTOCOL_ID]
       );
@@ -392,7 +404,7 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
       }
 
       try {
-        await unmarkOngoing(this.node.peerStore, remotePeerId);
+        await unmarkOngoing(this.components.peerStore, remotePeerId);
       } catch (unmarkErr) {
         console.warn(`[PSIProtocol] Error unmarking ongoing:`, unmarkErr);
       }
