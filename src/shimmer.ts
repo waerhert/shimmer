@@ -12,27 +12,17 @@ import {
   serviceDependencies,
 } from "@libp2p/interface";
 import type { RendezVous } from "./rendezvous/interface.js";
-import { Sketcher, type SketcherConfig } from "./sketcher/Sketcher.js";
-import { PSIProtocol } from "./psi/protocol.js";
+import { Sketcher, type SketcherConfig } from "./sketcher/sketcher.js";
+import { PSIProtocol, type PSIResult } from "./psi/protocol.js";
 import { TypedEventEmitter } from "@libp2p/interface";
+import { PeerRegistry } from "./peers/registry.js";
+import { ProximityPeer } from "./peers/peer.js";
+import type { Sketch } from "./sketcher/sketch.js";
 
 // ShimmerComponents accepts any libp2p components
 // This allows different rendezvous implementations to access what they need
 export interface ShimmerComponents extends Record<string, any> {
   peerId: PeerId;
-}
-
-/**
- * PSI metadata stored in peerStore to track PSI completion state
- */
-interface PSIMetadata {
-  modality: string;
-  epoch: string;
-  timestamp: number;
-  similarity: number;
-  intersectionSize: number;
-  totalItems: number;
-  completed: boolean;
 }
 
 /**
@@ -84,11 +74,16 @@ export interface ShimmerInit<T extends string = string> {
 
 export interface ShimmerEvents extends PeerDiscoveryEvents {
   "peer:discovered": CustomEvent<{
-    peerInfo: PeerInfo;
-    publicTag: string;
-    modality: string;
+    peer: ProximityPeer;
+    sketch: Sketch;
   }>;
-  "sketch:created": CustomEvent<{ modality: string }>;
+  "peer:psi:complete": CustomEvent<{
+    peer: ProximityPeer;
+    sketch: Sketch;
+    result: PSIResult;
+  }>;
+  "sketch:created": CustomEvent<{ modality: string; sketch: Sketch }>;
+  "sketch:expired": CustomEvent<{ modality: string; sketch: Sketch }>;
   "announce:complete": CustomEvent<{ modality: string; tagCount: number }>;
 }
 
@@ -127,6 +122,7 @@ export class Shimmer<T extends string = string>
   private readonly rendezvous: RendezVous;
   private readonly sketcher: Sketcher<T>;
   private readonly psiProtocol: PSIProtocol<T>;
+  private readonly peerRegistry: PeerRegistry; 
   private readonly autoAnnounce: boolean;
   private readonly autoDiscoverInterval: number | undefined;
   private started = false;
@@ -141,40 +137,87 @@ export class Shimmer<T extends string = string>
     this.components = components;
     this.rendezvous = init.rendezvous;
     this.sketcher = new Sketcher<T>(init.sketcherConfig);
+    this.peerRegistry = new PeerRegistry();
     this.autoAnnounce = init.autoAnnounce ?? true;
     this.autoDiscoverInterval = init.autoDiscoverInterval;
 
-    // Components is the libp2p instance - cast it to access protocol methods
-    const node = components as unknown as Libp2p;
-    this.psiProtocol = new PSIProtocol(node, this.sketcher);
+    setInterval(() => {
+      const peers = this.peerRegistry.getPeers();
+      const loggable = peers.map(peer => {
+        const sketchesMap = (peer as any).sketches as Map<string, Sketch>;
+        const psiResultsMap = (peer as any).psiResults as Map<string, any>;
 
+        return {
+          peerId: peer.peerInfo.id.toString(),
+          multiaddrs: peer.peerInfo.multiaddrs.map(ma => ma.toString()),
+          isClose: peer.isClose(),
+          sketches: Array.from(sketchesMap.entries()).map(([id, sketch]) => ({
+            id,
+            modality: sketch.modality,
+            epoch: sketch.epoch,
+            expiresAt: sketch.expiresAt,
+            itemCount: sketch.items.length,
+            isValid: sketch.isValid()
+          })),
+          psiResults: Array.from(psiResultsMap.entries()).map(([sketchId, result]) => ({
+            sketchId,
+            similarity: result.similarity,
+            intersectionSize: result.intersectionSize,
+            totalItems: result.totalItems,
+            completedAt: result.completedAt
+          }))
+        };
+      });
+      console.log('[Shimmer] Peers:', JSON.stringify(loggable, null, 2));
+    }, 4000);
+
+    // Components is the libp2p instance - cast it to access protocol methods
+    this.psiProtocol = new PSIProtocol(components as unknown as Libp2p, this.sketcher);
+
+    // Listen for PSI completion events
+    this.psiProtocol.on("psi:complete", ({ peer, sketch, result }) => {
+      // Add peer to registry and store PSI result
+      const registeredPeer = this.peerRegistry.addPeer(peer.peerInfo, sketch);
+      registeredPeer.setPSIResult(sketch, result);
+
+      // Emit public event for external consumers
+      this.dispatchEvent(
+        new CustomEvent("peer:psi:complete", {
+          detail: { peer: registeredPeer, sketch, result },
+        })
+      );
+    });
+
+    // Auto-announce when sketch is created
     if (this.autoAnnounce) {
-      this.sketcher.on("sketch", (event) => {
-        const modality = event.modality as T;
-        this.announce(modality).catch((err) => {
+      this.sketcher.on("sketch", ({ sketch }) => {
+        this.announceSketch(sketch).catch((err) => {
           console.error(
-            `Auto-announce failed for modality '${modality}':`,
+            `Auto-announce failed for sketch '${sketch.id}':`,
             err
           );
         });
       });
     }
 
-    // Listen for epoch expiry to withdraw provider records and clean up PSI metadata
-    this.sketcher.on("expire", (event) => {
-      this.rendezvous.withdraw(event.oldTags).catch((err: any) => {
+    // Auto-withdraw when sketch expires
+    this.sketcher.on("expire", ({ modality, sketch }) => {
+      this.rendezvous.withdraw(sketch.tags).catch((err: any) => {
         console.error(
-          `Failed to withdraw expired epoch '${event.oldEpoch}' in modality '${event.modality}':`,
+          `Failed to withdraw expired sketch '${sketch.id}':`,
           err
         );
       });
 
-      // Clean up expired PSI metadata
-      /*
-      this.cleanupExpiredPSIMetadata(event.modality as T, event.oldEpoch).catch((err) => {
-        console.error(`Failed to cleanup PSI metadata for ${event.modality}:`, err);
-      });
-      */
+      // Cleanup peers (respects 60s grace period)
+      this.peerRegistry.cleanup();
+
+      // Emit public event for external consumers
+      this.dispatchEvent(
+        new CustomEvent("sketch:expired", {
+          detail: { modality, sketch },
+        })
+      );
     });
   }
 
@@ -248,10 +291,29 @@ export class Shimmer<T extends string = string>
    * @example
    * await shimmer.sketch('interests', ['music', 'art', 'coding']);
    */
-  async sketch(modality: T, items: string[]): Promise<void> {
-    await this.sketcher.sketch(modality, items);
+  async sketch(modality: T, items: string[]): Promise<Sketch> {
+    const sketch = await this.sketcher.sketch(modality, items);
     this.dispatchEvent(
-      new CustomEvent("sketch:created", { detail: { modality } })
+      new CustomEvent("sketch:created", { detail: { modality, sketch } })
+    );
+    return sketch;
+  }
+
+  /**
+   * Announce a sketch to the rendezvous
+   * Internal helper used by auto-announce
+   */
+  private async announceSketch(sketch: Sketch): Promise<void> {
+    const peerInfo: PeerInfo = {
+      id: this.components.peerId,
+      multiaddrs: [], // TODO: Get from address manager
+    };
+
+    await this.rendezvous.announce(sketch.tags, peerInfo, sketch.expiresAt);
+    this.dispatchEvent(
+      new CustomEvent("announce:complete", {
+        detail: { modality: sketch.modality, tagCount: sketch.tags.publicTags.length },
+      })
     );
   }
 
@@ -262,101 +324,82 @@ export class Shimmer<T extends string = string>
    * @param modality - The modality to announce
    */
   async announce(modality: T): Promise<void> {
-    const tags = this.sketcher.getTags(modality);
-    if (!tags) {
+    const sketch = this.sketcher.getCurrentSketch(modality);
+    if (!sketch) {
       throw new Error(
-        `No valid tags for modality ${modality}. Call sketch() first or check epoch expiry.`
+        `No valid sketch for modality ${modality}. Call sketch() first or check epoch expiry.`
       );
     }
 
-    const peerInfo: PeerInfo = {
-      id: this.components.peerId,
-      multiaddrs: [], // TODO: Get from address manager
-    };
-
-    await this.rendezvous.announce(tags, peerInfo, tags.expiresAt);
-    this.dispatchEvent(
-      new CustomEvent("announce:complete", {
-        detail: { modality, tagCount: tags.publicTags.length },
-      })
-    );
+    await this.announceSketch(sketch);
   }
 
   /**
    * Discover peers with similar content for a modality
    *
    * @param modality - The modality to discover peers for
-   * @returns Array of discovered peers with their matching tags
+   * @returns Array of discovered proximity peers
    *
    * @example
    * const peers = await shimmer.discover('interests');
    * console.log(`Found ${peers.length} similar peers`);
    */
-  async discover(
-    modality: T
-  ): Promise<Array<{ peerInfo: PeerInfo; publicTag: string }>> {
-    const tags = this.sketcher.getTags(modality);
-    if (!tags) {
+  async discover(modality: T): Promise<ProximityPeer[]> {
+    // SNAPSHOT: Get sketch once
+    const sketch = this.sketcher.getCurrentSketch(modality);
+    if (!sketch) {
       throw new Error(
-        `No valid tags for modality ${modality}. Call sketch() first or check epoch expiry.`
+        `No valid sketch for modality ${modality}. Call sketch() first or check epoch expiry.`
       );
     }
 
-    // Get current epoch for PSI metadata checking
-    const currentEpoch = this.sketcher.getModalityState(modality)?.epoch;
+    // Discover peers using sketch tags
+    const rawResults = await this.rendezvous.discover(sketch.tags);
 
-    // dedup results, todo improve
-    const seen: string[] = [];
-    const results = await (await this.rendezvous.discover(tags)).filter(v => {
-      if (seen.includes(v.peerInfo.id.toString())) {
-        return false;
-      }
-      seen.push(v.peerInfo.id.toString());
-      return true;
-    })
+    const peers: ProximityPeer[] = [];
+    const seen = new Set<string>();
 
-
-    for (const result of results) {
+    for (const result of rawResults) {
+      // Skip self
       if (result.peerInfo.id.equals(this.components.peerId)) {
         continue;
       }
 
-      // Merge peer into peerStore (handles deduplication and multiaddr merging)
+      // Deduplicate by peer ID
+      const key = result.peerInfo.id.toString();
+      if (seen.has(key)) {
+        continue;
+      }
+      seen.add(key);
+
+      // Merge into peerStore if available
       if (this.components.peerStore && result.peerInfo.multiaddrs.length > 0) {
         await this.components.peerStore.merge(result.peerInfo.id, {
           multiaddrs: result.peerInfo.multiaddrs,
         });
       }
 
-      // Check if PSI should be initiated (checks peerStore metadata)
-      const shouldInitiate = await this.shouldInitiatePSI(
-        result.peerInfo.id,
-        modality,
-        currentEpoch
+      // Add to peer registry (creates or updates ProximityPeer)
+      const peer = this.peerRegistry.addPeer(result.peerInfo, sketch);
+      peers.push(peer);
+
+      // Emit libp2p 'peer' event for discovery system
+      this.dispatchEvent(
+        new CustomEvent("peer", {
+          detail: result.peerInfo,
+        })
       );
 
-      if (shouldInitiate) {
-        // Emit 'peer' event - libp2p wires PeerDiscovery services to discovery system
-        // Following libp2p convention: emit liberally, peerStore handles deduplication
-        this.dispatchEvent(
-          new CustomEvent("peer", {
-            detail: result.peerInfo,
-          })
-        );
+      // Emit Shimmer-specific event
+      this.dispatchEvent(
+        new CustomEvent("peer:discovered", {
+          detail: { peer, sketch },
+        })
+      );
 
-        // Emit Shimmer-specific event with additional metadata for PSI context
-        this.dispatchEvent(
-          new CustomEvent("peer:discovered", {
-            detail: {
-              peerInfo: result.peerInfo,
-              publicTag: result.publicTag,
-              modality,
-            },
-          })
-        );
-
-        // Initiate PSI with discovered peer
-        this.initiatePSIWithPeer(result.peerInfo, modality).catch((err) => {
+      // Initiate PSI if not already done for this sketch
+      if (!peer.hasPSIFor(sketch)) {
+        this.initiatePSI(peer, sketch).catch((err: any) => {
           console.error(
             `Failed to initiate PSI with ${result.peerInfo.id.toString()}:`,
             err
@@ -365,109 +408,31 @@ export class Shimmer<T extends string = string>
       }
     }
 
-    return results;
+    return peers;
   }
 
   /**
-   * Initiate PSI handshake with a discovered peer
-   * This is called automatically when peers are discovered
+   * Initiate PSI with a peer for a specific sketch
+   * Result will be stored via the psi:complete event handler
    */
-  private async initiatePSIWithPeer(
-    peerInfo: PeerInfo,
-    modality: T
-  ): Promise<void> {
-    const psiResult = await this.psiProtocol.initiatePSI(peerInfo, modality);
+  private async initiatePSI(peer: ProximityPeer, sketch: Sketch): Promise<void> {
+    await this.psiProtocol.initiatePSI(peer, sketch);
   }
 
   /**
-   * Check if PSI should be initiated with a peer
-   * Returns false if PSI already completed for this peer/modality/epoch
+   * Check if a peer is currently considered close
+   * Uses 60s grace period to prevent flickering
    */
-  private async shouldInitiatePSI(
-    peerId: PeerId,
-    modality: T,
-    currentEpoch?: string
-  ): Promise<boolean> {
-    if (!this.components.peerStore) {
-      return true; // No peerStore = always initiate
-    }
-    try {
-      const peer = await this.components.peerStore.get(peerId);
-      const metadataKey = `shimmer:psi:${modality}`;
-      const metadataBytes = peer.metadata.get(metadataKey);
-
-      if (!metadataBytes) {
-        return true; // No metadata = never done PSI
-      }
-
-      // Decode metadata
-      const metadataJson = new TextDecoder().decode(metadataBytes);
-      const psiMetadata: PSIMetadata = JSON.parse(metadataJson);
-
-      // Check if epoch matches (if epoch changed, we should redo PSI)
-      if (currentEpoch && psiMetadata.epoch !== currentEpoch) {
-        console.log(
-          `[Shimmer] Epoch changed for ${peerId.toString()} (${
-            psiMetadata.epoch
-          } → ${currentEpoch}), re-running PSI`
-        );
-        return true;
-      }
-
-      // PSI already completed for this peer/modality/epoch
-      console.log(
-        `[Shimmer] PSI already completed with ${peerId.toString()} for ${modality} (${psiMetadata.similarity.toFixed(
-          1
-        )}%)`
-      );
-      return false;
-    } catch (err) {
-      // Peer not in store or metadata corrupted = initiate PSI
-      return true;
-    }
+  isPeerClose(peerId: PeerId): boolean {
+    return this.peerRegistry.getPeer(peerId)?.isClose() ?? false;
   }
 
   /**
-   * Clean up expired PSI metadata when epoch changes
+   * Get a proximity peer by ID
    */
-  /*
-  private async cleanupExpiredPSIMetadata(modality: T, expiredEpoch: string): Promise<void> {
-    if (!this.components.peerStore) {
-      return;
-    }
-
-    const metadataKey = `shimmer:psi:${modality}`;
-    let cleanedCount = 0;
-
-    try {
-      // Iterate through all peers in the peerStore
-      for await (const peer of this.components.peerStore.all()) {
-        const metadataBytes = peer.metadata.get(metadataKey);
-        if (!metadataBytes) continue;
-
-        try {
-          const metadata: PSIMetadata = JSON.parse(new TextDecoder().decode(metadataBytes));
-
-          // If this metadata is for the expired epoch, remove it
-          if (metadata.epoch === expiredEpoch) {
-            await this.components.peerStore.merge(peer.id, {
-              metadata: { [metadataKey]: undefined } // undefined removes the key
-            });
-            cleanedCount++;
-          }
-        } catch (err) {
-          // Ignore parse errors for individual entries
-        }
-      }
-
-      if (cleanedCount > 0) {
-        console.log(`[Shimmer] Cleaned up ${cleanedCount} expired PSI metadata entries for ${modality}`);
-      }
-    } catch (err) {
-      console.error(`[Shimmer] Failed to cleanup PSI metadata:`, err);
-    }
+  getPeer(peerId: PeerId): ProximityPeer | undefined {
+    return this.peerRegistry.getPeer(peerId);
   }
-  */
 
   private async autoDiscover(): Promise<void> {
     const modalities = this.sketcher.getModalities() as T[];

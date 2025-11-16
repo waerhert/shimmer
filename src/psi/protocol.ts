@@ -1,5 +1,6 @@
 import type { Libp2p } from "libp2p";
-import type { Sketcher } from "../sketcher/Sketcher.js";
+import type { Sketcher } from "../sketcher/sketcher.js";
+import type { Sketch } from "../sketcher/sketch.js";
 import { PSIServer, PSIClient } from "./psi.js";
 import { lpStream, type LengthPrefixedStream } from "@libp2p/utils";
 import type {
@@ -9,22 +10,31 @@ import type {
   PeerStore,
   Stream,
 } from "@libp2p/interface";
-import { peerIdFromString } from "@libp2p/peer-id";
+import { EventEmitter } from "node:events";
+import { ProximityPeer } from "../peers/peer.js";
 
 const PROTOCOL_ID = "/shimmer/psi/1.0.0";
+const PSI_TIMEOUT_MS = 30000; // 30 seconds timeout for PSI operations
 
 export interface PSIProtocolOptions {
   similarityThreshold?: number; // Minimum similarity % to consider peer as "in proximity" (default: 50)
 }
 
-export interface PSIMetadata<T> {
-  modality: T;
-  epoch: string;
-  timestamp: number;
+export interface PSIResult {
   similarity: number;
   intersectionSize: number;
   totalItems: number;
-  completed: true;
+  completedAt: number;
+}
+
+export interface PSICompleteEvent {
+  peer: ProximityPeer;
+  sketch: Sketch;
+  result: PSIResult;
+}
+
+interface PSIProtocolEventMap {
+  "psi:complete": [data: PSICompleteEvent];
 }
 
 /**
@@ -33,23 +43,23 @@ export interface PSIMetadata<T> {
  * Implements /shimmer/psi/1.0.0 protocol for computing similarity between peers
  * using their MinHash signatures without revealing the actual items.
  */
-export class PSIProtocol<T extends string = string> {
+export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProtocolEventMap> {
   private node: Libp2p;
   private sketcher: Sketcher<T>;
   private options: Required<PSIProtocolOptions>;
-  private myPeerId: string;
 
   constructor(
     node: Libp2p,
     sketcher: Sketcher<T>,
     options: PSIProtocolOptions = {}
   ) {
+    super();
+
     this.node = node;
     this.sketcher = sketcher;
     this.options = {
       similarityThreshold: options.similarityThreshold ?? 50,
     };
-    this.myPeerId = (this.node as any).peerId.toString();
 
     // Register protocol handler
     this.registerProtocolHandler();
@@ -59,16 +69,11 @@ export class PSIProtocol<T extends string = string> {
     lp: LengthPrefixedStream,
     stream: Stream,
     remotePeerId: string,
-    modality: T
-  ): Promise<number> {
+    sketch: Sketch
+  ): Promise<PSIResult> {
     try {
-      const modalityState = this.sketcher.getModalityState(modality as any);
-      if (!modalityState) {
-        throw new Error(`No sketch data for modality: ${modality}`);
-      }
-
-      // Use original items for PSI (exact intersection, not lossy signature)
-      const ourItems = modalityState.items;
+      const modality = sketch.modality as T;
+      const ourItems = sketch.items;
 
       // Create PSI client and request
       const client = new PSIClient();
@@ -106,30 +111,20 @@ export class PSIProtocol<T extends string = string> {
         )}% similarity`
       );
 
-      // If above threshold, record as proximity peer
-      if (similarity >= this.options.similarityThreshold) {
-        /*
-        const proximityPeer: ProximityPeer = {
-          peerId,
-          modality,
-          similarity,
-          timestamp: Date.now(),
-          intersectionSize,
-          totalItems: ourItems.length,
-          epoch: modalityState.epoch,
-        };
-        */
-
-        return similarity;
-      }
+      return {
+        similarity,
+        intersectionSize,
+        totalItems: ourItems.length,
+        completedAt: Date.now(),
+      };
     } catch (err) {
       console.error(
-        `[PSIProtocol] Failed to initiate PSI with ${remotePeerId}:`,
+        `[PSIProtocol] Failed to act as client with ${remotePeerId}:`,
         err
       );
       stream.abort(err instanceof Error ? err : new Error(String(err)));
+      throw err; // Propagate error instead of returning zeros
     }
-    return 0;
   }
 
   private async actAsServer(
@@ -137,7 +132,6 @@ export class PSIProtocol<T extends string = string> {
     stream: Stream,
     remotePeerId: string
   ): Promise<T> {
-    let modalitySecondPass: T;
     try {
       // Read the incoming request
       const requestData = await lp.read();
@@ -145,20 +139,18 @@ export class PSIProtocol<T extends string = string> {
         new TextDecoder().decode(requestData.subarray())
       );
 
-      modalitySecondPass = request.modality as T;
-
       console.log(
         `[PSIProtocol] Received PSI request from ${remotePeerId} for modality: ${request.modality}`
       );
 
       // Get our items for this modality (use original items, not signature)
-      const modalityState = this.sketcher.getModalityState(request.modality);
-      if (!modalityState) {
+      const sketch = this.sketcher.getCurrentSketch(request.modality);
+      if (!sketch) {
         throw new Error(`No sketch data for modality: ${request.modality}`);
       }
 
       // Use original items for PSI (exact intersection, not lossy signature)
-      const ourItems = modalityState.items;
+      const ourItems = sketch.items;
 
       // Create PSI server and process request
       const server = new PSIServer();
@@ -183,158 +175,227 @@ export class PSIProtocol<T extends string = string> {
       return request.modality as T;
     } catch (err) {
       console.error(
-        `[PSIProtocol] Error handling incoming PSI from ${remotePeerId}:`,
+        `[PSIProtocol] Error acting as server for ${remotePeerId}:`,
         err
       );
       stream.abort(err instanceof Error ? err : new Error(String(err)));
+      throw err; // Propagate error instead of returning "none"
     }
-
-    return "none" as T;
   }
 
-  private async doPSI(
-    existingStream: Stream | null, // null signals we have to create stream ourselves, is outward connection
-    modalityFirstPass: T | null,
-    ourPeerId: PeerId,
-    theirPeerId: PeerId
-  ): Promise<number> {
-    let proximity: number;
-    let modalitySecondPass: T;
-    let stream: Stream;
+  /**
+   * Handle incoming PSI negotiation
+   * Flow: We act as SERVER first (receive request), then CLIENT (send request)
+   */
+  private async handleIncomingPSI(
+    stream: Stream,
+    connection: Connection
+  ): Promise<void> {
+    const remotePeerId = connection.remotePeer;
+    let modality: T | undefined;
+    let usedSketch: Sketch | undefined;
 
-    if (await isOngoing(this.node.peerStore, theirPeerId)) {
-      // Abandon stream because already ongoing
-      if (existingStream) existingStream.close();
-      return 0;
-    }
+    console.log(`[PSIProtocol] Handling incoming PSI from ${remotePeerId.toString()}`);
 
-    if (!existingStream) {
-      // Open a stream using the protocol
-      stream = await (this.node as any).connectionManager.openStream(
-        theirPeerId,
-        [PROTOCOL_ID]
-      );
-    } else {
-      stream = existingStream;
-    }
-
-    const lp = lpStream(stream);
-
-    // Mark negotiation as ongoing
-    await markOngoing(this.node.peerStore, theirPeerId);
-
-    if (ourPeerId.toString() < theirPeerId.toString()) {
-      // NODE A
-      if (modalityFirstPass === null) {
-        throw new Error("Connecting outward but modalityfirstpass is null");
+    try {
+      // Check if PSI is already ongoing
+      if (await isOngoing(this.node.peerStore, remotePeerId)) {
+        stream.close();
+        throw new Error(`PSI already ongoing with peer ${remotePeerId.toString()}`);
       }
-      proximity = await this.actAsClient(
-        lp,
-        stream,
-        theirPeerId.toString(),
-        modalityFirstPass
+
+      // Mark as ongoing to prevent race conditions
+      await markOngoing(this.node.peerStore, remotePeerId);
+
+      const lp = lpStream(stream);
+
+      // Wrap PSI execution with timeout
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error(`PSI timeout after ${PSI_TIMEOUT_MS}ms`)),
+          PSI_TIMEOUT_MS
+        );
+      });
+
+      const psiExecution = async (): Promise<PSIResult> => {
+        // Step 1: Act as SERVER (receive their request, send our response)
+        modality = await this.actAsServer(lp, stream, remotePeerId.toString());
+
+        // Step 2: Get our sketch for this modality
+        usedSketch = this.sketcher.getCurrentSketch(modality);
+        if (!usedSketch) {
+          throw new Error(`No sketch for modality ${modality} after receiving PSI`);
+        }
+
+        // Step 3: Act as CLIENT (send our request, receive their response)
+        const result = await this.actAsClient(
+          lp,
+          stream,
+          remotePeerId.toString(),
+          usedSketch
+        );
+
+        return result;
+      };
+
+      const result = await Promise.race([psiExecution(), timeoutPromise]);
+
+      // Create ProximityPeer for the event
+      const peerInfo: PeerInfo = {
+        id: connection.remotePeer,
+        multiaddrs: [connection.remoteAddr],
+      };
+      const peer = new ProximityPeer(peerInfo);
+
+      // Emit completion event ONLY on success
+      this.emit("psi:complete", {
+        peer,
+        sketch: usedSketch!,
+        result,
+      });
+
+      console.log(
+        `[PSIProtocol] Incoming PSI completed with ${remotePeerId.toString()}: ${result.similarity.toFixed(1)}%`
       );
-      await this.actAsServer(lp, stream, theirPeerId.toString());
-    } else {
-      // NODE B
-      modalitySecondPass = await this.actAsServer(
-        lp,
-        stream,
-        theirPeerId.toString()
+    } catch (err) {
+      console.error(
+        `[PSIProtocol] Incoming PSI failed with ${remotePeerId.toString()}:`,
+        err
       );
-      proximity = await this.actAsClient(
-        lp,
-        stream,
-        theirPeerId.toString(),
-        modalitySecondPass
-      );
+      throw err;
+    } finally {
+      // Guaranteed cleanup
+      try {
+        stream.close();
+      } catch (closeErr) {
+        console.warn(`[PSIProtocol] Error closing stream:`, closeErr);
+      }
+
+      try {
+        await unmarkOngoing(this.node.peerStore, remotePeerId);
+      } catch (unmarkErr) {
+        console.warn(`[PSIProtocol] Error unmarking ongoing:`, unmarkErr);
+      }
     }
-
-    const modality = modalityFirstPass ?? modalitySecondPass!;
-    // todo this is very ugly, prone to race conditions, we need to completely review the data flow and stop re-querying the sketcher
-    const currentEpoch = this.sketcher.getModalityState(modality)?.epoch;
-    await this.storePSIResult(
-      theirPeerId.toString(),
-      modality,
-      proximity,
-      proximity,
-      proximity,
-      currentEpoch
-    );
-
-    await setProximity(this.node.peerStore, theirPeerId, proximity);
-    await unmarkOngoing(this.node.peerStore, theirPeerId);
-
-    return proximity;
   }
 
   private registerProtocolHandler(): void {
     (this.node as any).registrar.handle(
       PROTOCOL_ID,
       async (stream: Stream, connection: Connection) => {
-        this.doPSI(stream, null, this.node.peerId, connection.remotePeer);
+        try {
+          await this.handleIncomingPSI(stream, connection);
+        } catch (err) {
+          // Error already logged in handleIncomingPSI - don't emit psi:complete on failure
+          console.error(
+            `[PSIProtocol] Incoming PSI handler failed for ${connection.remotePeer.toString()}:`,
+            err
+          );
+        }
       }
     );
   }
 
   /**
-   * Initiate PSI handshake with a peer (we act as client)
+   * Initiate PSI handshake with a peer
+   * Flow: We act as CLIENT first (send request), then SERVER (receive request)
    *
-   * Implements tiebreaker logic: if both peers try to initiate simultaneously,
-   * only the peer with the lexicographically smaller ID acts as client.
+   * @param peer - ProximityPeer to initiate PSI with
+   * @param sketch - Sketch containing items and modality (avoids temporal coupling)
    */
-  public async initiatePSI(peerInfo: PeerInfo, modality: T): Promise<number> {
-    return await this.doPSI(null, modality, this.node.peerId, peerInfo.id);
-  }
+  public async initiatePSI(
+    peer: ProximityPeer,
+    sketch: Sketch
+  ): Promise<PSIResult> {
+    const remotePeerId = peer.peerInfo.id;
+    const modality = sketch.modality as T;
+    let stream: Stream | undefined;
 
-  /**
-   * Store PSI result in peerStore metadata
-   */
-  private async storePSIResult(
-    peerIdStr: string,
-    modality: T,
-    similarity: number,
-    intersectionSize: number,
-    totalItems: number,
-    epoch?: string
-  ): Promise<void> {
-    if (!this.node.peerStore) {
-      return;
-    }
+    console.log(
+      `[PSIProtocol] Initiating PSI with ${remotePeerId.toString()} for modality: ${modality}`
+    );
 
     try {
-      // Parse peerId string to PeerId object
-      const peerIdBytes = this.node.peerId.constructor as any;
-      const peerId = peerIdBytes.createFromB58String
-        ? peerIdBytes.createFromB58String(peerIdStr)
-        : await (await import("@libp2p/peer-id")).peerIdFromString(peerIdStr);
+      // Check if PSI is already ongoing
+      if (await isOngoing(this.node.peerStore, remotePeerId)) {
+        throw new Error(`PSI already ongoing with peer ${remotePeerId.toString()}`);
+      }
 
-      const psiMetadata: PSIMetadata<T> = {
-        modality,
-        epoch: epoch || "",
-        timestamp: Date.now(),
-        similarity,
-        intersectionSize,
-        totalItems,
-        completed: true,
-      };
+      // Mark as ongoing to prevent race conditions
+      await markOngoing(this.node.peerStore, remotePeerId);
 
-      const metadataKey = `shimmer:psi:${modality}`;
-      const metadataBytes = new TextEncoder().encode(
-        JSON.stringify(psiMetadata)
+      // Open stream to remote peer
+      stream = await (this.node as any).connectionManager.openStream(
+        remotePeerId,
+        [PROTOCOL_ID]
       );
 
-      await this.node.peerStore.merge(peerId, {
-        metadata: { [metadataKey]: metadataBytes },
+      if (!stream) {
+        throw new Error("Failed to open stream");
+      }
+
+      // Assign to const for type narrowing in closure
+      const activeStream = stream;
+      const lp = lpStream(activeStream);
+
+      // Wrap PSI execution with timeout
+      const timeoutPromise = new Promise<never>((_, reject) => {
+        setTimeout(
+          () => reject(new Error(`PSI timeout after ${PSI_TIMEOUT_MS}ms`)),
+          PSI_TIMEOUT_MS
+        );
+      });
+
+      const psiExecution = async (): Promise<PSIResult> => {
+        // Step 1: Act as CLIENT (send our request, receive their response)
+        const result = await this.actAsClient(
+          lp,
+          activeStream,
+          remotePeerId.toString(),
+          sketch
+        );
+
+        // Step 2: Act as SERVER (receive their request, send our response)
+        await this.actAsServer(lp, activeStream, remotePeerId.toString());
+
+        return result;
+      };
+
+      const result = await Promise.race([psiExecution(), timeoutPromise]);
+
+      // Emit completion event ONLY on success
+      this.emit("psi:complete", {
+        peer,
+        sketch,
+        result,
       });
 
       console.log(
-        `[Shimmer] Stored PSI result for ${peerIdStr} (${modality}: ${similarity.toFixed(
-          1
-        )}%)`
+        `[PSIProtocol] Outgoing PSI completed with ${remotePeerId.toString()}: ${result.similarity.toFixed(1)}%`
       );
+
+      return result;
     } catch (err) {
-      console.error(`[Shimmer] Failed to store PSI result:`, err);
+      console.error(
+        `[PSIProtocol] Outgoing PSI failed with ${remotePeerId.toString()}:`,
+        err
+      );
+      throw err;
+    } finally {
+      // Guaranteed cleanup
+      if (stream) {
+        try {
+          stream.close();
+        } catch (closeErr) {
+          console.warn(`[PSIProtocol] Error closing stream:`, closeErr);
+        }
+      }
+
+      try {
+        await unmarkOngoing(this.node.peerStore, remotePeerId);
+      } catch (unmarkErr) {
+        console.warn(`[PSIProtocol] Error unmarking ongoing:`, unmarkErr);
+      }
     }
   }
 }
@@ -358,31 +419,4 @@ async function unmarkOngoing(peerStore: PeerStore, peerId: PeerId) {
 async function isOngoing(peerStore: PeerStore, peerId: PeerId) {
   const store = await peerStore.get(peerId);
   return Boolean(store.metadata.get("shimmer/psi/ongoing"));
-}
-
-async function setProximity(
-  peerStore: PeerStore,
-  peerId: PeerId,
-  value: number
-) {
-  await peerStore.merge(peerId, {
-    metadata: {
-      "shimmer/psi/proximity": new Uint8Array([value]),
-    },
-  });
-}
-
-export async function getProximity(
-  peerStore: PeerStore,
-  peerId: PeerId
-): Promise<number> {
-  const store = await peerStore.get(peerId);
-
-  let value: any = store.metadata.get("shimmer/psi/proximity");
-
-  if (!value) {
-    return 0;
-  }
-
-  return value[0] as number;
 }

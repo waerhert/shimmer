@@ -1,6 +1,6 @@
 import { peerIdFromPublicKey, peerIdFromString } from "@libp2p/peer-id";
 import { HTTPEncryptedRendezVous } from "../rendezvous/http-client.js";
-import { Sketcher } from "../sketcher/Sketcher.js";
+import { Sketcher } from "../sketcher/sketcher.js";
 import { multiaddr } from "@multiformats/multiaddr";
 import { identities } from "./id.js";
 

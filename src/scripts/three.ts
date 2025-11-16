@@ -6,7 +6,7 @@ import { tcp } from "@libp2p/tcp";
 import { noise } from "@chainsafe/libp2p-noise";
 import { yamux } from "@chainsafe/libp2p-yamux";
 import { bootstrap } from "@libp2p/bootstrap";
-import { sleep, words2 } from "../util.js";
+import { sleep, words2, words3 } from "../util.js";
 import { identities, localMultiAddrFromIdentity } from "./id.js";
 import { shimmer } from "../shimmer.js";
 import { dhtRendezvous } from "../rendezvous/factories.js";
@@ -47,7 +47,7 @@ const node = await createLibp2p({
 await node.start();
 await node.services.shimmer.start();
 
-await node.services.shimmer.sketch('words', words2);
+await node.services.shimmer.sketch('words', words3);
 
 node.addEventListener("peer:connect", (evt) => {
   console.log("Peer connected:", evt.detail.toString());

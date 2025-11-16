@@ -11,8 +11,16 @@
 export { shimmer, Shimmer, type ShimmerInit, type ShimmerComponents, type ShimmerEvents } from "./shimmer.js";
 
 // Sketcher
-export { Sketcher, type SketcherConfig, type ModalityConfig } from "./sketcher/Sketcher.js";
+export { Sketcher, type SketcherConfig, type ModalityConfig } from "./sketcher/sketcher.js";
+export { Sketch } from "./sketcher/sketch.js";
 export { type Tags } from "./sketcher/crypto.js";
+
+// Peer management
+export { ProximityPeer } from "./peers/peer.js";
+export { PeerRegistry } from "./peers/registry.js";
+
+// PSI
+export { type PSIResult, type PSICompleteEvent } from "./psi/protocol.js";
 
 // Rendezvous interface
 export { type RendezVous, type PeerDiscoveryResult } from "./rendezvous/interface.js";

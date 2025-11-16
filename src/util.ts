@@ -15,3 +15,4 @@ export const aminoBootstrappers = [
 
 export const words1 = ['apple', 'car', 'banana', 'soap'];
 export const words2 = ['apple', 'car', 'banana', 'guitar'];
+export const words3 = ['apple', 'head', 'cat', 'guitar'];
