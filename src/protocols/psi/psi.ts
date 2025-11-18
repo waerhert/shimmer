@@ -1,6 +1,6 @@
-import type { Sketcher } from "../sketcher/sketcher.js";
-import type { Sketch } from "../sketcher/sketch.js";
-import { PSIServer, PSIClient } from "./psi.js";
+import type { Sketcher } from "../../sketcher/sketcher.js";
+import type { Sketch } from "../../sketcher/sketch.js";
+import { PSIServer, PSIClient } from "./helpers.js";
 import { lpStream, type LengthPrefixedStream } from "@libp2p/utils";
 import type {
   Connection,
@@ -8,45 +8,21 @@ import type {
   PeerInfo,
   PeerStore,
   Stream,
+  Startable,
 } from "@libp2p/interface";
+import { TypedEventEmitter } from "main-event";
+import { ProximityPeer } from "../../peers/peer.js";
+import { PSI_TIMEOUT_MS } from "./constants.js";
 import type {
-  Registrar,
-  ConnectionManager,
-} from "@libp2p/interface-internal";
-import { EventEmitter } from "node:events";
-import { ProximityPeer } from "../peers/peer.js";
-
-/**
- * PSIProtocolComponents - Explicit libp2p components needed by PSIProtocol
- */
-export interface PSIProtocolComponents {
-  peerStore: PeerStore;
-  registrar: Registrar;
-  connectionManager: ConnectionManager;
-}
-
-const PROTOCOL_ID = "/shimmer/psi/1.0.0";
-const PSI_TIMEOUT_MS = 30000; // 30 seconds timeout for PSI operations
-
-export interface PSIProtocolOptions {
-  similarityThreshold?: number; // Minimum similarity % to consider peer as "in proximity" (default: 50)
-}
-
-export interface PSIResult {
-  similarity: number;
-  intersectionSize: number;
-  totalItems: number;
-  completedAt: number;
-}
-
-export interface PSICompleteEvent {
-  peer: ProximityPeer;
-  sketch: Sketch;
-  result: PSIResult;
-}
+  PSIProtocolComponents,
+  PSIProtocolInit,
+  PSIResult,
+  PSICompleteEvent,
+  PSIProtocol as PSIProtocolInterface,
+} from "./index.js";
 
 interface PSIProtocolEventMap {
-  "psi:complete": [data: PSICompleteEvent];
+  "psi:complete": CustomEvent<PSICompleteEvent>;
 }
 
 /**
@@ -55,26 +31,58 @@ interface PSIProtocolEventMap {
  * Implements /shimmer/psi/1.0.0 protocol for computing similarity between peers
  * using their MinHash signatures without revealing the actual items.
  */
-export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProtocolEventMap> {
-  private components: PSIProtocolComponents;
-  private sketcher: Sketcher<T>;
-  private options: Required<PSIProtocolOptions>;
+export class PSIProtocol<T extends string = string>
+  extends TypedEventEmitter<PSIProtocolEventMap>
+  implements Startable, PSIProtocolInterface<T> {
+  public readonly protocol: string;
+  private readonly components: PSIProtocolComponents;
+  private readonly sketcher: Sketcher<T>;
+  private readonly init: PSIProtocolInit;
+  private readonly timeout: number;
+  private started: boolean;
 
   constructor(
     components: PSIProtocolComponents,
     sketcher: Sketcher<T>,
-    options: PSIProtocolOptions = {}
+    init: PSIProtocolInit = {}
   ) {
     super();
 
+    this.started = false;
     this.components = components;
     this.sketcher = sketcher;
-    this.options = {
-      similarityThreshold: options.similarityThreshold ?? 50,
-    };
+    this.protocol = '/shimmer/psi/1.0.0';
+    this.init = init;
+    this.timeout = init.timeout ?? PSI_TIMEOUT_MS;
+  }
 
-    // Register protocol handler
-    this.registerProtocolHandler();
+  readonly [Symbol.toStringTag] = '@shimmer/psi';
+
+  async start(): Promise<void> {
+    await this.components.registrar.handle(
+      this.protocol,
+      async (stream: Stream, connection: Connection) => {
+        try {
+          await this.handleIncomingPSI(stream, connection);
+        } catch (err) {
+          // Error already logged in handleIncomingPSI - don't emit psi:complete on failure
+          console.error(
+            `[PSIProtocol] Incoming PSI handler failed for ${connection.remotePeer.toString()}:`,
+            err
+          );
+        }
+      }
+    );
+    this.started = true;
+  }
+
+  async stop(): Promise<void> {
+    await this.components.registrar.unhandle(this.protocol);
+    this.started = false;
+  }
+
+  isStarted(): boolean {
+    return this.started;
   }
 
   private async actAsClient(
@@ -224,8 +232,8 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
       // Wrap PSI execution with timeout
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(
-          () => reject(new Error(`PSI timeout after ${PSI_TIMEOUT_MS}ms`)),
-          PSI_TIMEOUT_MS
+          () => reject(new Error(`PSI timeout after ${this.timeout}ms`)),
+          this.timeout
         );
       });
 
@@ -260,11 +268,11 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
       const peer = new ProximityPeer(peerInfo);
 
       // Emit completion event ONLY on success
-      this.emit("psi:complete", {
-        peer,
-        sketch: usedSketch!,
-        result,
-      });
+      this.dispatchEvent(
+        new CustomEvent("psi:complete", {
+          detail: { peer, sketch: usedSketch!, result },
+        })
+      );
 
       console.log(
         `[PSIProtocol] Incoming PSI completed with ${remotePeerId.toString()}: ${result.similarity.toFixed(1)}%`
@@ -291,21 +299,56 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
     }
   }
 
-  private registerProtocolHandler(): void {
-    this.components.registrar.handle(
-      PROTOCOL_ID,
-      async (stream: Stream, connection: Connection) => {
-        try {
-          await this.handleIncomingPSI(stream, connection);
-        } catch (err) {
-          // Error already logged in handleIncomingPSI - don't emit psi:complete on failure
-          console.error(
-            `[PSIProtocol] Incoming PSI handler failed for ${connection.remotePeer.toString()}:`,
-            err
+
+  /**
+   * Wait for a direct (non-limited) connection to a peer
+   * This prevents opening protocol streams on limited relay connections
+   *
+   * @param remotePeerId - Peer to wait for direct connection to
+   * @param timeoutMs - Maximum time to wait for direct connection (default: 10000ms)
+   */
+  private async waitForDirectConnection(
+    remotePeerId: PeerId,
+    timeoutMs: number = 10000
+  ): Promise<void> {
+    const startTime = Date.now();
+
+    // Check if we already have a direct connection
+    const connections = this.components.connectionManager.getConnections(remotePeerId);
+    const hasDirectConnection = connections.some(conn => !conn.limits);
+
+    if (hasDirectConnection) {
+      console.log(`[PSIProtocol] Direct connection to ${remotePeerId.toString()} already available`);
+      return;
+    }
+
+    console.log(`[PSIProtocol] Waiting for direct connection to ${remotePeerId.toString()}...`);
+
+    // Wait for a direct connection to be established
+    return new Promise((resolve) => {
+      const checkInterval = setInterval(() => {
+        const conns = this.components.connectionManager.getConnections(remotePeerId);
+        const directConn = conns.find(conn => !conn.limits);
+
+        if (directConn) {
+          clearInterval(checkInterval);
+          console.log(
+            `[PSIProtocol] Direct connection established to ${remotePeerId.toString()} via ${directConn.remoteAddr.toString()}`
           );
+          resolve();
+          return;
         }
-      }
-    );
+
+        if (Date.now() - startTime > timeoutMs) {
+          clearInterval(checkInterval);
+          console.warn(
+            `[PSIProtocol] Timeout waiting for direct connection to ${remotePeerId.toString()}, proceeding with limited connection`
+          );
+          // Don't reject - proceed with limited connection and let it fail if needed
+          resolve();
+        }
+      }, 100); // Check every 100ms
+    });
   }
 
   /**
@@ -336,10 +379,13 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
       // Mark as ongoing to prevent race conditions
       await markOngoing(this.components.peerStore, remotePeerId);
 
+      // Wait for a direct (non-limited) connection if we only have limited ones
+      await this.waitForDirectConnection(remotePeerId);
+
       // Open stream to remote peer
       stream = await this.components.connectionManager.openStream(
         remotePeerId,
-        [PROTOCOL_ID]
+        [this.protocol],
       );
 
       if (!stream) {
@@ -353,8 +399,8 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
       // Wrap PSI execution with timeout
       const timeoutPromise = new Promise<never>((_, reject) => {
         setTimeout(
-          () => reject(new Error(`PSI timeout after ${PSI_TIMEOUT_MS}ms`)),
-          PSI_TIMEOUT_MS
+          () => reject(new Error(`PSI timeout after ${this.timeout}ms`)),
+          this.timeout
         );
       });
 
@@ -376,11 +422,11 @@ export class PSIProtocol<T extends string = string> extends EventEmitter<PSIProt
       const result = await Promise.race([psiExecution(), timeoutPromise]);
 
       // Emit completion event ONLY on success
-      this.emit("psi:complete", {
-        peer,
-        sketch,
-        result,
-      });
+      this.dispatchEvent(
+        new CustomEvent("psi:complete", {
+          detail: { peer, sketch, result },
+        })
+      );
 
       console.log(
         `[PSIProtocol] Outgoing PSI completed with ${remotePeerId.toString()}: ${result.similarity.toFixed(1)}%`

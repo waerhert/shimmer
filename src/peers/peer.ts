@@ -1,5 +1,5 @@
 import type { PeerInfo } from '@libp2p/interface';
-import type { PSIResult } from '../psi/protocol.js';
+import type { PSIResult } from '../protocols/psi/index.js';
 import type { Sketch } from '../sketcher/sketch.js';
 
 
@@ -12,8 +12,55 @@ export class ProximityPeer {
   // Map: sketchId → Sketch reference
   private sketches = new Map<string, Sketch>();
 
+  // Generic metadata storage for protocol-specific data
+  private metadata = new Map<string, any>();
+
   constructor(peerInfo: PeerInfo) {
     this.peerInfo = peerInfo;
+  }
+
+  /**
+   * Set arbitrary metadata for this peer
+   * @param key - Metadata key (e.g., "name", "avatar", etc.)
+   * @param value - Metadata value
+   */
+  setMetadata(key: string, value: any): void {
+    this.metadata.set(key, value);
+  }
+
+  /**
+   * Get metadata by key
+   * @param key - Metadata key
+   * @returns The metadata value, or undefined if not set
+   */
+  getMetadata<T = any>(key: string): T | undefined {
+    return this.metadata.get(key);
+  }
+
+  /**
+   * Get all metadata as a plain object
+   * @returns Record of all metadata key-value pairs
+   */
+  getAllMetadata(): Record<string, any> {
+    return Object.fromEntries(this.metadata);
+  }
+
+  /**
+   * Check if metadata exists for a key
+   * @param key - Metadata key
+   * @returns true if the key exists
+   */
+  hasMetadata(key: string): boolean {
+    return this.metadata.has(key);
+  }
+
+  /**
+   * Delete metadata by key
+   * @param key - Metadata key
+   * @returns true if deleted, false if key didn't exist
+   */
+  deleteMetadata(key: string): boolean {
+    return this.metadata.delete(key);
   }
 
   addSketch(sketch: Sketch): void {

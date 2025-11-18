@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { PSIServer, PSIClient } from "../src/psi/psi.js";
+import { PSIServer, PSIClient } from "../src/protocols/psi/helpers.js";
 import { Sketcher } from "../src/sketcher/sketcher.js";
 
 describe("PSI", () => {

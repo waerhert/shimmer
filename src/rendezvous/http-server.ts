@@ -1,4 +1,5 @@
 import { Hono } from "hono";
+import { cors } from "hono/cors";
 import type { RawRendezVous, RawPeerDiscoveryResult } from "./interface.js";
 import { serve } from "@hono/node-server";
 
@@ -16,6 +17,10 @@ export class HTTPRendezVousServer implements RawRendezVous {
 
   constructor() {
     this.hono = new Hono();
+    // Enable CORS for all origins
+    this.hono.use("/*", cors({
+      origin: "*",
+    }));
     this.registerHandlers();
     this.cleanupTimer = setInterval(() => {
       this.cleanup();

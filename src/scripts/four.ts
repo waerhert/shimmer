@@ -56,5 +56,7 @@ node.addEventListener('peer:discovery', (evt) => {
 });
 
 // Keep running
-console.log("\nNode four is running. Press Ctrl+C to stop.");
-await sleep(1000000);
+console.log("\nNode FOUR is running. Press Ctrl+C to stop.");
+await sleep(1000);
+
+await node.services.shimmer.sketch('words', words2);

@@ -27,6 +27,7 @@ const node = await createLibp2p({
       }),
       autoDiscoverInterval: 5000,
       autoAnnounce: true,
+      nameInit: { name: 'three' },
     }),
     ping: ping(),
     identify: identify(),
@@ -47,7 +48,7 @@ const node = await createLibp2p({
 await node.start();
 await node.services.shimmer.start();
 
-await node.services.shimmer.sketch('words', words3);
+await node.services.shimmer.sketch('words', words2);
 
 node.addEventListener("peer:connect", (evt) => {
   console.log("Peer connected:", evt.detail.toString());
@@ -57,6 +58,12 @@ node.addEventListener('peer:discovery', (evt) => {
   console.log("✓ Discovered peer:", evt.detail.id.toString());
 });
 
+node.services.shimmer.addEventListener("peer:name:discovered", (evt) => {
+  console.log(`📛 Name discovered: ${evt.detail.name} (${evt.detail.peer.peerInfo.id.toString()})`);
+});
+
 // Keep running
 console.log("\nNode THREE is running. Press Ctrl+C to stop.");
-await sleep(1000000);
+await sleep(1000);
+
+await node.services.shimmer.sketch('words', words2);

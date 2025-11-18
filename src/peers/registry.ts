@@ -1,11 +1,11 @@
-import type { PeerId, PeerInfo } from '@libp2p/interface';
-import type { Sketch } from '../sketcher/sketch.js';
-import { ProximityPeer } from './peer.js';
+import type { PeerId, PeerInfo } from "@libp2p/interface";
+import type { Sketch } from "../sketcher/sketch.js";
+import { ProximityPeer } from "./peer.js";
 
 export class PeerRegistry {
   private peers = new Map<string, ProximityPeer>();
 
-  addPeer(peerInfo: PeerInfo, sketch: Sketch): ProximityPeer {
+  addPeer(peerInfo: PeerInfo, sketch?: Sketch): ProximityPeer {
     const key = peerInfo.id.toString();
 
     let peer = this.peers.get(key);
@@ -14,7 +14,9 @@ export class PeerRegistry {
       this.peers.set(key, peer);
     }
 
-    peer.addSketch(sketch);
+    if (sketch) {
+      peer.addSketch(sketch);
+    }
     return peer;
   }
 
@@ -29,7 +31,8 @@ export class PeerRegistry {
   cleanup(): void {
     // Remove peers with no valid sketches (respects grace period in isClose())
     for (const [key, peer] of this.peers) {
-      if (!peer.isClose()) {  // Uses 60s grace period by default
+      if (!peer.isClose()) {
+        // Uses 60s grace period by default
         this.peers.delete(key);
       }
     }

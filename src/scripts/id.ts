@@ -34,12 +34,12 @@ export const identities = {
   three: {
     key: await generateKeyPairFromSeed(
       "Ed25519",
-      await seedFromPhrase("three")
+      await seedFromPhrase("threeeee")
     ),
     port: 4528,
   },
   four: {
-    key: await generateKeyPairFromSeed("Ed25519", await seedFromPhrase("four")),
+    key: await generateKeyPairFromSeed("Ed25519", await seedFromPhrase("feeeour")),
     port: 4529,
   },
   five: {

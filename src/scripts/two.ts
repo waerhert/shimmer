@@ -27,6 +27,7 @@ const node = await createLibp2p({
       }),
       autoDiscoverInterval: 5000,
       autoAnnounce: true,
+      nameInit: { name: 'two' },
     }),
     ping: ping(),
     identify: identify(),
@@ -55,6 +56,10 @@ node.addEventListener("peer:connect", (evt) => {
 
 node.addEventListener("peer:discovery", (evt) => {
   console.log("✓ Discovered peer:", evt.detail.id.toString());
+});
+
+node.services.shimmer.addEventListener("peer:name:discovered", (evt) => {
+  console.log(`📛 Name discovered: ${evt.detail.name} (${evt.detail.peer.peerInfo.id.toString()})`);
 });
 
 // Keep running

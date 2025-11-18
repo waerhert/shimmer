@@ -13,13 +13,13 @@ APIs may change without notice, features are experimental, and there are known s
 Shimmer helps peers in the **same physical location** discover each other by observing their shared environment (WiFi networks, Bluetooth devices, cell towers). If you and I both see the same WiFi SSIDs, we're probably nearby - Shimmer lets us find each other.
 
 ```
-  Coffee Shop                          Library
+     Home                             Library
 ┌──────────────┐                  ┌──────────────┐
 │ WiFi: [      │                  │ WiFi: [      │
-│  "CoffeeNet" │                  │  "LibraryNet"│
-│  "Starbucks" │                  │  "PublicNet" │
-│ ]            │                  │ ]            │
-│              │                  │              │
+│  "MyWifi"    │                  │  "LibraryNet"│
+│  "FlyWifi"   │                  │  "PublicNet" │
+│  "Guest"     │                  │ ]            │
+│ ]            │                  │              │
 │  Peer A ────┐│                  │  Peer C      │
 │  Peer B ────┘│                  │              │
 └──────────────┘                  └──────────────┘
@@ -63,7 +63,7 @@ import { httpRendezvous } from './rendezvous/factories.js';
 
 const node = await createLibp2p({
   addresses: {
-    listen: ['/ip4/127.0.0.1/tcp/0']
+    listen: ['/ip4/0/tcp/0']
   },
   transports: [tcp()],
   connectionEncrypters: [noise()],
@@ -81,7 +81,8 @@ await node.start();
 await node.services.shimmer.start();
 
 // Sketch environmental observations
-const wifiNetworks = ['CoffeeNet', 'Starbucks', 'Guest123'];
+// In real application you would use SSID + BSSID
+const wifiNetworks = ['MyWifi', 'FlyWifi', 'Guest'];
 await node.services.shimmer.sketch('wifi', wifiNetworks);
 
 // Listen for nearby peers

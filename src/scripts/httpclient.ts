@@ -8,14 +8,14 @@ const client = new HTTPEncryptedRendezVous('http://localhost:8771');
 
 const sketcher = new Sketcher();
 
-await sketcher.sketch('words', ['1', '2']);
+const sketch = await sketcher.sketch('words', ['1', '2']);
 
-const tags = sketcher.getTags('words')!;
 
-await client.announce(tags, {
+
+await client.announce(sketch.tags, {
     id: peerIdFromPublicKey(identities.one.key.publicKey),
     multiaddrs: [multiaddr('/ip4/127.0.0.1/tcp/4001')]
-}, tags.expiresAt);
+}, sketch.expiresAt);
 
 
-client.discover(tags).then(console.log)
+client.discover(sketch.tags).then(console.log)

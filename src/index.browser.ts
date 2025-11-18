@@ -1,10 +1,13 @@
 /**
- * @shimmer/core - Privacy-preserving peer discovery for libp2p
+ * @shimmer/core - Browser build
+ * Privacy-preserving peer discovery for libp2p (Browser-compatible exports)
  *
  * Enables peers with similar content to discover each other without revealing
  * exact content to rendezvous servers or other peers.
  *
  * Uses locality-sensitive hashing (LSH) with epoch-based tags for privacy.
+ *
+ * Note: This build excludes Node.js-specific features like HTTP server and DHT.
  */
 
 // Main service
@@ -25,18 +28,14 @@ export { type PSIResult, type PSICompleteEvent } from "./protocols/psi/index.js"
 // Rendezvous interface
 export { type RendezVous, type PeerDiscoveryResult } from "./rendezvous/interface.js";
 
-// Rendezvous implementations
-export { HTTPEncryptedRendezVous } from "./rendezvous/http-client.js";
+// Browser-compatible rendezvous implementations
 export { InMemoryEncryptedRendezVous } from "./rendezvous/memory-encrypted.js";
 export { InMemoryRendezVous } from "./rendezvous/memory.js";
-export { DHTRendezVous, type DHTRendezVousConfig } from "./rendezvous/dht.js";
 
-// Convenient factory helpers
+// Browser-compatible factory helpers
 export {
-  httpRendezvous,
   memoryRendezvous,
   memoryRendezvousPlain,
-  dhtRendezvous,
 } from "./rendezvous/factories.js";
 
 // Encryption utilities

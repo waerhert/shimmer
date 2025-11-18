@@ -5,12 +5,15 @@ import type {
   PeerDiscovery,
   PeerDiscoveryEvents,
   PeerStore,
+  ComponentLogger,
+  Libp2pEvents,
 } from "@libp2p/interface";
 import type {
   AddressManager,
   Registrar,
   ConnectionManager,
 } from "@libp2p/interface-internal";
+import type { TypedEventTarget } from "main-event";
 import {
   peerDiscoverySymbol,
   serviceCapabilities,
@@ -18,21 +21,29 @@ import {
 } from "@libp2p/interface";
 import type { RendezVous } from "./rendezvous/interface.js";
 import { Sketcher, type SketcherConfig } from "./sketcher/sketcher.js";
-import { PSIProtocol, type PSIResult } from "./psi/protocol.js";
+import { PSIProtocol } from "./protocols/psi/psi.js";
+import type { PSIResult } from "./protocols/psi/index.js";
+import { Name } from "./protocols/name/name.js";
+import type { NameInit } from "./protocols/name/index.js";
 import { TypedEventEmitter } from "@libp2p/interface";
 import { PeerRegistry } from "./peers/registry.js";
 import { ProximityPeer } from "./peers/peer.js";
 import type { Sketch } from "./sketcher/sketch.js";
+import { WebRTC } from "@multiformats/multiaddr-matcher";
+import type { Ping } from "@libp2p/ping";
 
 /**
  * ShimmerComponents - Explicit libp2p components needed by Shimmer
  */
 export interface ShimmerComponents {
+  ping: Ping;
   peerId: PeerId;
   addressManager: AddressManager;
   peerStore: PeerStore;
   registrar: Registrar;
   connectionManager: ConnectionManager;
+  events: TypedEventTarget<Libp2pEvents>;
+  logger: ComponentLogger;
 }
 
 /**
@@ -41,7 +52,9 @@ export interface ShimmerComponents {
  * Pre-instantiated: For rendezvous that don't need libp2p components (memory, HTTP)
  * Factory: For rendezvous that need components (DHT)
  */
-export type RendezvousOption = RendezVous | ((components: ShimmerComponents) => RendezVous);
+export type RendezvousOption =
+  | RendezVous
+  | ((components: ShimmerComponents) => RendezVous);
 
 export interface ShimmerInit<T extends string = string> {
   /**
@@ -70,6 +83,15 @@ export interface ShimmerInit<T extends string = string> {
   sketcherConfig?: SketcherConfig<T>;
 
   /**
+   * Name protocol configuration
+   * Enables peer name exchange
+   *
+   * @example
+   * nameInit: { name: 'Alice', runOnConnectionOpen: true }
+   */
+  nameInit?: NameInit;
+
+  /**
    * Auto-announce on sketch events (default: true)
    * If true, automatically announces to rendezvous when sketch() is called
    */
@@ -91,6 +113,10 @@ export interface ShimmerEvents extends PeerDiscoveryEvents {
     peer: ProximityPeer;
     sketch: Sketch;
     result: PSIResult;
+  }>;
+  "peer:name:discovered": CustomEvent<{
+    peer: ProximityPeer;
+    name: string;
   }>;
   "sketch:created": CustomEvent<{ modality: string; sketch: Sketch }>;
   "sketch:expired": CustomEvent<{ modality: string; sketch: Sketch }>;
@@ -132,6 +158,7 @@ export class Shimmer<T extends string = string>
   private readonly rendezvous: RendezVous;
   private readonly sketcher: Sketcher<T>;
   private readonly psiProtocol: PSIProtocol<T>;
+  private readonly nameProtocol?: Name;
   private readonly peerRegistry: PeerRegistry;
   private readonly autoAnnounce: boolean;
   private readonly autoDiscoverInterval: number | undefined;
@@ -153,39 +180,43 @@ export class Shimmer<T extends string = string>
 
     setInterval(() => {
       const peers = this.peerRegistry.getPeers();
-      const loggable = peers.map(peer => {
+      const loggable = peers.map((peer) => {
         const sketchesMap = (peer as any).sketches as Map<string, Sketch>;
         const psiResultsMap = (peer as any).psiResults as Map<string, any>;
 
         return {
           peerId: peer.peerInfo.id.toString(),
-          multiaddrs: peer.peerInfo.multiaddrs.map(ma => ma.toString()),
+          multiaddrs: peer.peerInfo.multiaddrs.map((ma) => ma.toString()),
           isClose: peer.isClose(),
+          name: peer.getMetadata('name'),
           sketches: Array.from(sketchesMap.entries()).map(([id, sketch]) => ({
             id,
             modality: sketch.modality,
             epoch: sketch.epoch,
             expiresAt: sketch.expiresAt,
             itemCount: sketch.items.length,
-            isValid: sketch.isValid()
+            isValid: sketch.isValid(),
           })),
-          psiResults: Array.from(psiResultsMap.entries()).map(([sketchId, result]) => ({
-            sketchId,
-            similarity: result.similarity,
-            intersectionSize: result.intersectionSize,
-            totalItems: result.totalItems,
-            completedAt: result.completedAt
-          }))
+          psiResults: Array.from(psiResultsMap.entries()).map(
+            ([sketchId, result]) => ({
+              sketchId,
+              similarity: result.similarity,
+              intersectionSize: result.intersectionSize,
+              totalItems: result.totalItems,
+              completedAt: result.completedAt,
+            })
+          ),
         };
       });
-      console.log('[Shimmer] Peers:', JSON.stringify(loggable, null, 2));
+      console.log("[Shimmer] Peers:", JSON.stringify(loggable, null, 2));
     }, 4000);
 
     // Pass components directly to PSIProtocol
     this.psiProtocol = new PSIProtocol(components, this.sketcher);
 
     // Listen for PSI completion events
-    this.psiProtocol.on("psi:complete", ({ peer, sketch, result }) => {
+    this.psiProtocol.addEventListener("psi:complete", (event) => {
+      const { peer, sketch, result } = event.detail;
       // Add peer to registry and store PSI result
       const registeredPeer = this.peerRegistry.addPeer(peer.peerInfo, sketch);
       registeredPeer.setPSIResult(sketch, result);
@@ -198,25 +229,47 @@ export class Shimmer<T extends string = string>
       );
     });
 
+    // Initialize Name protocol if configured
+    if (init.nameInit) {
+      this.nameProtocol = new Name(this.components, init.nameInit);
+
+      // Listen for name discovery events
+      this.nameProtocol.addEventListener("name:discovered", async (event) => {
+        const { peerInfo, name } = event.detail;
+
+        // Get or create peer in registry
+        let peer = this.peerRegistry.getPeer(peerInfo.id);
+        if (!peer) {
+          peer = this.peerRegistry.addPeer(peerInfo, undefined);
+        }
+
+        // Store name in peer metadata
+        peer.setMetadata("name", name);
+
+        // Emit Shimmer-level event
+        this.dispatchEvent(
+          new CustomEvent("peer:name:discovered", {
+            detail: { peer, name },
+          })
+        );
+      });
+    }
+
     // Auto-announce when sketch is created
     if (this.autoAnnounce) {
-      this.sketcher.on("sketch", ({ sketch }) => {
+      this.sketcher.addEventListener("sketch", (event) => {
+        const { sketch } = event.detail;
         this.announceSketch(sketch).catch((err) => {
-          console.error(
-            `Auto-announce failed for sketch '${sketch.id}':`,
-            err
-          );
+          console.error(`Auto-announce failed for sketch '${sketch.id}':`, err);
         });
       });
     }
 
     // Auto-withdraw when sketch expires
-    this.sketcher.on("expire", ({ modality, sketch }) => {
+    this.sketcher.addEventListener("expire", (event) => {
+      const { modality, sketch } = event.detail;
       this.rendezvous.withdraw(sketch.tags).catch((err: any) => {
-        console.error(
-          `Failed to withdraw expired sketch '${sketch.id}':`,
-          err
-        );
+        console.error(`Failed to withdraw expired sketch '${sketch.id}':`, err);
       });
 
       // Cleanup peers (respects 60s grace period)
@@ -254,6 +307,14 @@ export class Shimmer<T extends string = string>
       await (this.rendezvous as any).start();
     }
 
+    // Start PSI protocol
+    await this.psiProtocol.start();
+
+    // Start Name protocol if configured
+    if (this.nameProtocol) {
+      await this.nameProtocol.start();
+    }
+
     // Start auto-discovery timer if configured
     if (this.autoDiscoverInterval) {
       this.discoveryTimer = setInterval(() => {
@@ -275,6 +336,14 @@ export class Shimmer<T extends string = string>
     if (this.discoveryTimer) {
       clearInterval(this.discoveryTimer);
       this.discoveryTimer = undefined;
+    }
+
+    // Stop PSI protocol
+    await this.psiProtocol.stop();
+
+    // Stop Name protocol if configured
+    if (this.nameProtocol) {
+      await this.nameProtocol.stop();
     }
 
     // Stop rendezvous if it has a stop method
@@ -316,13 +385,22 @@ export class Shimmer<T extends string = string>
   private async announceSketch(sketch: Sketch): Promise<void> {
     const peerInfo: PeerInfo = {
       id: this.components.peerId,
-      multiaddrs: this.components.addressManager.getAddresses()
+      multiaddrs: this.components.addressManager.getAddresses(),
+      //.filter((ma) => WebRTC.matches(ma)),
     };
 
+    if (peerInfo.multiaddrs.length === 0) {
+      throw new Error("Announcing ourself with empty multiaddrs!");
+    }
+
+    console.log("ANNONCING", sketch.tags.publicTags[0]);
     await this.rendezvous.announce(sketch.tags, peerInfo, sketch.expiresAt);
     this.dispatchEvent(
       new CustomEvent("announce:complete", {
-        detail: { modality: sketch.modality, tagCount: sketch.tags.publicTags.length },
+        detail: {
+          modality: sketch.modality,
+          tagCount: sketch.tags.publicTags.length,
+        },
       })
     );
   }
@@ -364,7 +442,9 @@ export class Shimmer<T extends string = string>
     }
 
     // Discover peers using sketch tags
-    const rawResults = await this.rendezvous.discover(sketch.tags); 
+    const rawResults = await this.rendezvous.discover(sketch.tags);
+
+    console.log("RAW", { rawResults: rawResults.length });
 
     const peers: ProximityPeer[] = [];
     const seen = new Set<string>();
@@ -372,17 +452,26 @@ export class Shimmer<T extends string = string>
     for (const result of rawResults) {
       // Validate results
       if (!result.peerInfo.id) {
+        console.log("Found raw result but has no id");
         continue;
       }
 
-      if (!result.peerInfo.multiaddrs || !Array.isArray(result.peerInfo.multiaddrs)) {
+      if (
+        !result.peerInfo.multiaddrs ||
+        !Array.isArray(result.peerInfo.multiaddrs)
+      ) {
+        console.log("Found raw result but has no multiaddrs");
+
         continue;
       }
 
-      if (Array.isArray(result.peerInfo.multiaddrs) && result.peerInfo.multiaddrs.length === 0) {
+      if (
+        Array.isArray(result.peerInfo.multiaddrs) &&
+        result.peerInfo.multiaddrs.length === 0
+      ) {
+        console.log("Found raw discovery result but multiaddrs is empty");
         continue;
       }
-
 
       // Skip self
       if (result.peerInfo.id.equals(this.components.peerId)) {
@@ -407,6 +496,26 @@ export class Shimmer<T extends string = string>
       const peer = this.peerRegistry.addPeer(result.peerInfo, sketch);
       peers.push(peer);
 
+      try {
+        for (const addr of result.peerInfo.multiaddrs) {
+          console.log("Pinging ", addr.toString());
+          const signal = AbortSignal.timeout(10000);
+          console.log(result.peerInfo.multiaddrs.map((x) => x.toString()));
+          await this.components.ping
+            .ping(addr, {
+              signal,
+            })
+            .then((rtt) => {
+              console.log(
+                `[Shimmer] Pinged ${result.peerInfo.id.toString()} with RTT = ${rtt}`
+              );
+            });
+        }
+      } catch (err) {
+        console.log(err);
+        //throw err;
+      }
+
       // Emit libp2p 'peer' event for discovery system
       this.dispatchEvent(
         new CustomEvent("peer", {
@@ -421,9 +530,17 @@ export class Shimmer<T extends string = string>
         })
       );
 
+
+      // TODO: Should we really do this on every discover ??
+      // Maybe only do this is we dont have name or PSIresult anymore
+      // or if their records ahve expired ??
+      this.nameProtocol?.name(peer.peerInfo.id);
+
       // Initiate PSI if not already done for this sketch
       if (!peer.hasPSIFor(sketch)) {
-        this.initiatePSI(peer, sketch).catch((err: any) => {
+        // First, ensure we're connected to the peer (dial if needed)
+        // This will establish the relay connection and trigger WebRTC upgrade
+        this.ensureConnectionAndPSI(peer, sketch).catch((err: any) => {
           console.error(
             `Failed to initiate PSI with ${result.peerInfo.id.toString()}:`,
             err
@@ -435,11 +552,48 @@ export class Shimmer<T extends string = string>
     return peers;
   }
 
+  // TODO REVIEW THIS
   /**
-   * Initiate PSI with a peer for a specific sketch
-   * Result will be stored via the psi:complete event handler
+   * Ensure we're connected to the peer, then initiate PSI
+   * This dials the peer first to establish connection and trigger WebRTC upgrade
    */
-  private async initiatePSI(peer: ProximityPeer, sketch: Sketch): Promise<void> {
+  private async ensureConnectionAndPSI(
+    peer: ProximityPeer,
+    sketch: Sketch
+  ): Promise<void> {
+    const peerId = peer.peerInfo.id;
+
+    const signal = AbortSignal.timeout(5000);
+    const rtt = await this.components.ping.ping(peer.peerInfo.multiaddrs, {
+      signal,
+    });
+
+    console.log(`[Shimmer] Pinged ${peerId.toString()} with RTT = ${rtt}`);
+
+    // Check if we already have a connection
+    const existingConns =
+      this.components.connectionManager.getConnections(peerId);
+
+    if (existingConns.length === 0) {
+      console.log(
+        `[Shimmer] Dialing ${peerId.toString()} to establish connection...`
+      );
+
+      try {
+        // Dial the peer using their multiaddrs from peerInfo
+        // This will establish the relay connection first
+        await this.components.connectionManager.openConnection(
+          peer.peerInfo.multiaddrs
+        );
+        console.log(
+          `[Shimmer] Relay connection established to ${peerId.toString()}`
+        );
+      } catch (err) {
+        console.log("[Shimmer] Failed to dial peer");
+      }
+    }
+
+    // Now initiate PSI - the waitForDirectConnection in PSI protocol will handle WebRTC upgrade
     await this.psiProtocol.initiatePSI(peer, sketch);
   }
 

@@ -1,4 +1,4 @@
-import { EventEmitter } from "node:events";
+import { TypedEventEmitter } from "main-event";
 import { LSH, minHash, type Tags } from "./lsh.js";
 import { Sketch } from "./sketch.js";
 
@@ -35,13 +35,13 @@ export interface ModalityState {
 }
 
 interface SketcherEventMap {
-  sketch: [data: { modality: string; sketch: Sketch }];
-  expire: [data: { modality: string; sketch: Sketch }];
+  sketch: CustomEvent<{ modality: string; sketch: Sketch }>;
+  expire: CustomEvent<{ modality: string; sketch: Sketch }>;
 }
 
 export class Sketcher<
   T extends string = DefaultModalities
-> extends EventEmitter<SketcherEventMap> {
+> extends TypedEventEmitter<SketcherEventMap> {
   private config: SketcherConfig<T>;
   private sketches = new Map<T, Sketch>(); // Changed
 
@@ -55,7 +55,9 @@ export class Sketcher<
   public async sketch(modality: T, items: string[]) {
     const existing = this.sketches.get(modality);
     if (existing) {
-      this.emit("expire", { modality, sketch: existing });
+      this.dispatchEvent(
+        new CustomEvent("expire", { detail: { modality, sketch: existing } })
+      );
       existing.clearExpiryTimer();
     }
 
@@ -92,14 +94,18 @@ export class Sketcher<
     const timer = setTimeout(() => {
       const current = this.sketches.get(modality);
       if (current === sketch) {
-        this.emit("expire", { modality, sketch });
+        this.dispatchEvent(
+          new CustomEvent("expire", { detail: { modality, sketch } })
+        );
         this.sketches.delete(modality);
       }
     }, expiresAt - Date.now());
 
     sketch.setExpiryTimer(timer);
     this.sketches.set(modality, sketch);
-    this.emit("sketch", { modality, sketch });
+    this.dispatchEvent(
+      new CustomEvent("sketch", { detail: { modality, sketch } })
+    );
 
     return sketch;
   }

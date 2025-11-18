@@ -3,11 +3,25 @@
   "name": "shimmer",
   "version": "0.0.1",
   "description": "",
-  "main": "index.js",
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "browser": {
+        "types": "./dist/index.browser.d.ts",
+        "import": "./dist/index.browser.js",
+        "default": "./dist/index.browser.js"
+      },
+      "node": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js",
+        "default": "./dist/index.js"
+      },
+      "default": {
+        "types": "./dist/index.d.ts",
+        "import": "./dist/index.js"
+      }
     }
   },
   "files": [
@@ -42,6 +56,7 @@
     "@openmined/psi.js": "^2.0.6",
     "hono": "^4.10.5",
     "libp2p": "^3.1.0",
+    "main-event": "^1.0.1",
     "multiformats": "^13.4.1"
   }
 }
