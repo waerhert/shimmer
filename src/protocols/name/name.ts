@@ -94,65 +94,6 @@ export class Name extends TypedEventEmitter<NameEventMap> implements Startable, 
     await stream.close({ signal })
   }
 
-  /**
-   * Exchange names on an existing connection
-   * This reuses the connection instead of opening a new one
-   */
-  async exchangeNameOnConnection (connection: Connection): Promise<string> {
-    const stream = await connection.newStream(this.protocol)
-    const log = stream.log.newScope('name')
-    const received = new Uint8ArrayList()
-    const output = Promise.withResolvers<string>()
-
-    stream.addEventListener('message', (evt: any) => {
-      received.append(evt.data)
-      log('received %d bytes', received.byteLength)
-    })
-
-    stream.addEventListener('close', async (evt: any) => {
-      if (evt.error != null) {
-        output.reject(evt.error)
-        return
-      }
-
-      const remoteName = uint8ArrayToString(received.subarray())
-      log('name exchange complete: %s', remoteName)
-
-      // Store name in peerStore as metadata
-      if ('peerStore' in this.components) {
-        await (this.components as any).peerStore.merge(connection.remotePeer, {
-          metadata: {
-            'shimmer/name': uint8ArrayFromString(remoteName)
-          }
-        }).catch((err: Error) => {
-          log('failed to store name in peerStore: %s', err.message)
-        })
-      }
-
-      // Emit event for reactive updates with full PeerInfo
-      const peerInfo: PeerInfo = {
-        id: connection.remotePeer,
-        multiaddrs: [connection.remoteAddr]
-      }
-      this.dispatchEvent(
-        new CustomEvent('name:discovered', {
-          detail: { peerInfo, name: remoteName }
-        })
-      )
-
-      output.resolve(remoteName)
-    })
-
-    // Send our name
-    const nameBytes = uint8ArrayFromString(this.localName)
-    log('sending name: %s', this.localName)
-    stream.send(nameBytes)
-
-    await stream.close()
-
-    return output.promise
-  }
-
   async name (peer: PeerId | Multiaddr | Multiaddr[], options?: OpenConnectionOptions): Promise<string> {
     // Open connection first, then create stream from it
     const connection = await this.components.connectionManager.openConnection(peer, {
