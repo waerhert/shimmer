@@ -4,11 +4,10 @@ import type { Server } from "@openmined/psi.js/implementation/server.js";
 
 let psi: any = null;
 
-// TODO this is messy
 async function ensureInit() {
   if (!psi) {
     if (!PSI.default) {
-     // @ts-ignore
+      // @ts-ignore
       psi = await PSI();
     } else {
       psi = await PSI.default();
@@ -16,17 +15,22 @@ async function ensureInit() {
   }
 }
 
-await ensureInit();
-
 const fpr = 0.001; // false positive rate (0.1%)
 
 export class PSIServer {
-  private server: Server | null = psi.server!.createWithNewKey();
+  private server: Server;
+
+  private constructor(server: Server) {
+    this.server = server;
+  }
+
+  static async create(): Promise<PSIServer> {
+    await ensureInit();
+    const server = psi.server!.createWithNewKey();
+    return new PSIServer(server);
+  }
 
   createSetup(items: string[], numClientElements: number): Uint8Array {
-    if (!this.server) {
-      throw new Error("Server has been deleted");
-    }
     if (items.length === 0) {
       throw new Error("items cannot be empty");
     }
@@ -41,12 +45,9 @@ export class PSIServer {
   }
 
   // The return result is sent to the client, along with the serializedServerSetupMessage (above)
-  // This methos calls this.server.delete() which deletes the server in wasm, as recommended
+  // This method calls this.server.delete() which deletes the server in wasm, as recommended
   // this means this instance becomes unusable once processRequest() has run
   processRequest(serializedClientRequest: Uint8Array): Uint8Array {
-    if (!this.server) {
-      throw new Error("Server has been deleted");
-    }
     // Deserialize the client request for the server
     const deserializedClientRequest = psi.request.deserializeBinary(
       serializedClientRequest
@@ -59,19 +60,25 @@ export class PSIServer {
     const serializedServerResponse = serverResponse.serializeBinary();
 
     this.server.delete();
-    this.server = null;
 
     return serializedServerResponse;
   }
 }
 
 export class PSIClient {
-  private client: Client | null = psi.client!.createWithNewKey();
+  private client: Client;
+
+  private constructor(client: Client) {
+    this.client = client;
+  }
+
+  static async create(): Promise<PSIClient> {
+    await ensureInit();
+    const client = psi.client!.createWithNewKey();
+    return new PSIClient(client);
+  }
 
   createRequest(items: string[]): Uint8Array {
-    if (!this.client) {
-      throw new Error("Client has been deleted");
-    }
     const clientRequest = this.client.createRequest(items);
     const serializedClientRequest = clientRequest.serializeBinary();
     return serializedClientRequest;
@@ -83,9 +90,6 @@ export class PSIClient {
     serializedServerSetup: Uint8Array,
     serializedServerResponse: Uint8Array
   ): number {
-    if (!this.client) {
-      throw new Error("Client has been deleted");
-    }
     const deserializedServerResponse = psi.response.deserializeBinary(
       serializedServerResponse
     );
@@ -99,8 +103,23 @@ export class PSIClient {
     );
 
     this.client.delete();
-    this.client = null;
 
     return intersectionSize;
   }
+}
+
+/**
+ * Factory function to create a PSI server
+ * Ensures WASM initialization before creating the server
+ */
+export async function createPSIServer(): Promise<PSIServer> {
+  return PSIServer.create();
+}
+
+/**
+ * Factory function to create a PSI client
+ * Ensures WASM initialization before creating the client
+ */
+export async function createPSIClient(): Promise<PSIClient> {
+  return PSIClient.create();
 }

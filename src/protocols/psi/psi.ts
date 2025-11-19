@@ -1,6 +1,6 @@
 import type { Sketcher } from "../../sketcher/sketcher.js";
 import type { Sketch } from "../../sketcher/sketch.js";
-import { PSIServer, PSIClient } from "./helpers.js";
+import { createPSIServer, createPSIClient } from "./helpers.js";
 import { lpStream, type LengthPrefixedStream } from "@libp2p/utils";
 import type {
   Connection,
@@ -96,7 +96,7 @@ export class PSIProtocol<T extends string = string>
       const ourItems = sketch.items;
 
       // Create PSI client and request
-      const client = new PSIClient();
+      const client = await createPSIClient();
       const clientRequest = client.createRequest(ourItems);
 
       // Send the request
@@ -173,7 +173,7 @@ export class PSIProtocol<T extends string = string>
       const ourItems = sketch.items;
 
       // Create PSI server and process request
-      const server = new PSIServer();
+      const server = await createPSIServer();
       const clientRequest = Uint8Array.from(request.clientRequest);
       const setupMessage = server.createSetup(ourItems, ourItems.length);
       const serverResponse = server.processRequest(clientRequest);

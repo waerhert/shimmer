@@ -31,11 +31,13 @@ export { type RendezVous, type PeerDiscoveryResult } from "./rendezvous/interfac
 // Browser-compatible rendezvous implementations
 export { InMemoryEncryptedRendezVous } from "./rendezvous/memory-encrypted.js";
 export { InMemoryRendezVous } from "./rendezvous/memory.js";
+export { HTTPEncryptedRendezVous } from "./rendezvous/http-client.js";
 
 // Browser-compatible factory helpers
 export {
   memoryRendezvous,
   memoryRendezvousPlain,
+  httpRendezvous,
 } from "./rendezvous/factories.js";
 
 // Encryption utilities

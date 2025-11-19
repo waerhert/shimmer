@@ -29,13 +29,16 @@
   ],
   "scripts": {
     "build": "tsc",
-    "test": "vitest"
+    "test": "vitest",
+    "bootstrap": "tsx src/cli/bootstrap-server.ts",
+    "rendezvous": "tsx src/cli/rendezvous-http-server.ts"
   },
   "author": "Sven De Waerhert",
   "license": "MIT",
   "devDependencies": {
     "@libp2p/crypto": "^5.1.13",
     "@types/node": "^24.10.1",
+    "tsx": "^4.19.2",
     "typescript": "^5.9.3",
     "vitest": "^4.0.7"
   },
@@ -44,6 +47,7 @@
     "@chainsafe/libp2p-yamux": "^8.0.1",
     "@hono/node-server": "^1.19.6",
     "@libp2p/bootstrap": "^12.0.8",
+    "@libp2p/circuit-relay-v2": "^4.1.2",
     "@libp2p/identify": "^4.0.7",
     "@libp2p/interface": "^3.1.0",
     "@libp2p/interface-internal": "^3.0.9",
@@ -52,6 +56,7 @@
     "@libp2p/ping": "^3.0.7",
     "@libp2p/tcp": "^11.0.7",
     "@libp2p/utils": "^7.0.7",
+    "@libp2p/websockets": "^10.1.2",
     "@multiformats/multiaddr": "^13.0.1",
     "@openmined/psi.js": "^2.0.6",
     "hono": "^4.10.5",
